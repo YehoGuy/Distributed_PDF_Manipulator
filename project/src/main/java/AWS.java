@@ -1,310 +1,112 @@
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Base64;
 
-import software.amazon.awssdk.core.ResponseBytes;
-import software.amazon.awssdk.core.exception.AbortedException;
-import software.amazon.awssdk.core.pagination.sync.SdkIterable;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
+import software.amazon.awssdk.services.ec2.model.CreateTagsRequest;
+import software.amazon.awssdk.services.ec2.model.Ec2Exception;
+import software.amazon.awssdk.services.ec2.model.IamInstanceProfileSpecification;
+import software.amazon.awssdk.services.ec2.model.InstanceType;
+import software.amazon.awssdk.services.ec2.model.RunInstancesRequest;
+import software.amazon.awssdk.services.ec2.model.RunInstancesResponse;
 import software.amazon.awssdk.services.ec2.model.Tag;
-import software.amazon.awssdk.services.ec2.model.*;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.*;
-import software.amazon.awssdk.services.s3.paginators.ListObjectsV2Iterable;
+import software.amazon.awssdk.services.s3.model.BucketLocationConstraint;
+import software.amazon.awssdk.services.s3.model.CreateBucketConfiguration;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.sqs.SqsClient;
-import software.amazon.awssdk.services.sqs.model.*;
-public class AWS {
+import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 
-    public final String IMAGE_AMI = "ami-08902199a8aa0bc09"; //TODO change ami?
-    public Region region1 = Region.US_WEST_2;
+public class AWS {
     private final S3Client s3;
     private final SqsClient sqs;
     private final Ec2Client ec2;
-    private final String bucketName;
-    private static AWS instance = null;
+
+    public static String ami = "ami-00e95a9222311e8ed";
+
+    public static Region region1 = Region.US_WEST_2;
+    public static Region region2 = Region.US_EAST_1;
+
+    private static final AWS instance = new AWS();
 
     private AWS() {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
-        ec2 = Ec2Client.builder().region(region1).build();
-        bucketName = "my-bucket"; //TODO: change to Assignment1-bucket
+        ec2 = Ec2Client.builder().region(region2).build();
     }
 
     public static AWS getInstance() {
-        if (instance == null) {
-            return new AWS();
-        }
-
         return instance;
     }
 
+    public String bucketName = "only-together2";
 
-//////////////////////////////////////////  EC2
 
-    public void runInstanceFromAMI(String ami) {
-        RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
+    // S3
+    public void createBucketIfNotExists(String bucketName) {
+        try {
+            s3.createBucket(CreateBucketRequest
+                    .builder()
+                    .bucket(bucketName)
+                    .createBucketConfiguration(
+                            CreateBucketConfiguration.builder()
+                                    .locationConstraint(BucketLocationConstraint.US_WEST_2)
+                                    .build())
+                    .build());
+            s3.waiter().waitUntilBucketExists(HeadBucketRequest.builder()
+                    .bucket(bucketName)
+                    .build());
+        } catch (S3Exception e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    // EC2
+    public String createEC2(String script, String tagName, int numberOfInstances) {
+        Ec2Client ec2 = Ec2Client.builder().region(region2).build();
+        RunInstancesRequest runRequest = (RunInstancesRequest) RunInstancesRequest.builder()
+                .instanceType(InstanceType.M4_LARGE)
                 .imageId(ami)
-                .instanceType(InstanceType.T2_MICRO)
+                .maxCount(numberOfInstances)
                 .minCount(1)
-                .maxCount(5) // todo decide what to put here
+                .keyName("vockey")
+                .iamInstanceProfile(IamInstanceProfileSpecification.builder().name("LabInstanceProfile").build())
+                .userData(Base64.getEncoder().encodeToString((script).getBytes()))
                 .build();
 
-        // Launch the instance
-        try {
-            ec2.runInstances(runInstancesRequest);
-        } catch (Exception ignored) {
-        }
-    }
 
-    public RunInstancesResponse runInstanceFromAmiWithScript(String ami, InstanceType instanceType, int min, int max, String script) {
-        RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
-                .imageId(ami)
-                .instanceType(instanceType)
-                .minCount(min)
-                .maxCount(max)
-                .userData(Base64.getEncoder().encodeToString(script.getBytes()))
-                // @ADD security feratures
+        RunInstancesResponse response = ec2.runInstances(runRequest);
+
+        String instanceId = response.instances().get(0).instanceId();
+
+        software.amazon.awssdk.services.ec2.model.Tag tag = Tag.builder()
+                .key("Name")
+                .value(tagName)
                 .build();
 
-        // Launch the instance
-        try {
-            return ec2.runInstances(runInstancesRequest);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public List<Instance> getAllInstances() {
-        DescribeInstancesRequest describeInstancesRequest = DescribeInstancesRequest.builder().build();
-
-        DescribeInstancesResponse describeInstancesResponse = null;
-        try {
-            describeInstancesResponse = ec2.describeInstances(describeInstancesRequest);
-        } catch (Exception ignored) {
-        }
-
-        return describeInstancesResponse.reservations().stream()
-                .flatMap(r -> r.instances().stream())
-                .toList();
-    }
-
-    public List<Instance> getAllInstancesWithLabel(Label label) throws InterruptedException {
-        DescribeInstancesRequest describeInstancesRequest =
-                DescribeInstancesRequest.builder()
-                        .filters(Filter.builder()
-                                .name("tag:Label")
-                                .values(label.toString())
-                                .build())
-                        .build();
-
-        DescribeInstancesResponse describeInstancesResponse = ec2.describeInstances(describeInstancesRequest);
-
-        return describeInstancesResponse.reservations().stream()
-                .flatMap(r -> r.instances().stream())
-                .toList();
-    }
-
-    public void terminateInstance(String instanceId) {
-        TerminateInstancesRequest terminateRequest = TerminateInstancesRequest.builder()
-                .instanceIds(instanceId)
-                .build();
-
-        // Terminate the instance
-        try {
-            ec2.terminateInstances(terminateRequest);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        System.out.println("Terminated instance: " + instanceId);
-    }
-
-
-    ////////////////////////////// S3
-
-    public String uploadFileToS3(String keyPath, File file) throws Exception {
-        System.out.printf("Start upload: %s, to S3\n", file.getName());
-
-        PutObjectRequest req =
-                PutObjectRequest.builder()
-
-                        .bucket(bucketName)
-                        .key(keyPath)
-                        .build();
-
-        s3.putObject(req, file.toPath()); // we don't need to check if the file exist already
-        // Return the S3 path of the uploaded file
-        return "s3://" + bucketName + "/" + keyPath;
-    }
-
-    public void downloadFileFromS3(String keyPath, File outputFile) {
-        System.out.println("Start downloading file " + keyPath + " to " + outputFile.getPath());
-
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                .bucket(bucketName)
-                .key(keyPath)
+        CreateTagsRequest tagRequest = (CreateTagsRequest) CreateTagsRequest.builder()
+                .resources(instanceId)
+                .tags(tag)
                 .build();
 
         try {
-            ResponseBytes<GetObjectResponse> objectBytes = s3.getObjectAsBytes(getObjectRequest);
-            byte[] data = objectBytes.asByteArray();
+            ec2.createTags(tagRequest);
+            System.out.printf(
+                    "[DEBUG] Successfully started EC2 instance %s based on AMI %s\n",
+                    instanceId, ami);
 
-            // Write the data to a local file.
-            OutputStream os = new FileOutputStream(outputFile);
-            os.write(data);
-            System.out.println("Successfully obtained bytes from an S3 object");
-            os.close();
-        } catch (Exception ignored) {
+        } catch (Ec2Exception e) {
+            System.err.println("[ERROR] " + e.getMessage());
+            System.exit(1);
         }
+        return instanceId;
     }
 
-    public void createBucket(String bucketName) {
-        s3.createBucket(CreateBucketRequest
-                .builder()
-                .bucket(bucketName)
-                .createBucketConfiguration(
-                        CreateBucketConfiguration.builder()
-                                .build())
-                .build());
-        s3.waiter().waitUntilBucketExists(HeadBucketRequest.builder()
-                .bucket(bucketName)
-                .build());
-    }
-
-    public SdkIterable<S3Object> listObjectsInBucket(String bucketName) {
-        // Build the list objects request
-        ListObjectsV2Request listReq = ListObjectsV2Request.builder()
-                .bucket(bucketName)
-                .maxKeys(1)
-                .build();
-
-        ListObjectsV2Iterable listRes = null;
-        try {
-            listRes = s3.listObjectsV2Paginator(listReq);
-        } catch (Exception ignored) {
-        }
-        // Process response pages
-        listRes.stream()
-                .flatMap(r -> r.contents().stream())
-                .forEach(content -> System.out.println(" Key: " + content.key() + " size = " + content.size()));
-
-        return listRes.contents();
-    }
-
-    public void deleteEmptyBucket(String bucketName) {
-        DeleteBucketRequest deleteBucketRequest = DeleteBucketRequest.builder().bucket(bucketName).build();
-        try {
-            s3.deleteBucket(deleteBucketRequest);
-        } catch (Exception ignored) {
-        }
-    }
-
-    public void deleteAllObjectsFromBucket(String bucketName) {
-        SdkIterable<S3Object> contents = listObjectsInBucket(bucketName);
-
-        Collection<ObjectIdentifier> keys = contents.stream()
-                .map(content ->
-                        ObjectIdentifier.builder()
-                                .key(content.key())
-                                .build())
-                .toList();
-
-        Delete del = Delete.builder().objects(keys).build();
-
-        DeleteObjectsRequest multiObjectDeleteRequest = DeleteObjectsRequest.builder()
-                .bucket(bucketName)
-                .delete(del)
-                .build();
-
-        try {
-            s3.deleteObjects(multiObjectDeleteRequest);
-        } catch (Exception ignored) {
-        }
-    }
-
-    public void deleteBucket(String bucketName) {
-        deleteAllObjectsFromBucket(bucketName);
-        deleteEmptyBucket(bucketName);
-    }
-
-    //////////////////////////////////////////////SQS
-
-    /**
-     * @param queueName
-     * @return queueUrl
-     */
-    public String createQueue(String queueName) {
-        CreateQueueRequest request = CreateQueueRequest.builder()
+    public void createSqsQueue(String queueName) {
+        CreateQueueRequest createQueueRequest = CreateQueueRequest.builder()
                 .queueName(queueName)
                 .build();
-        CreateQueueResponse create_result = null;
-        try {
-            create_result = sqs.createQueue(request);
-        } catch (Exception ignored) {
-        }
-
-        assert create_result != null;
-        String queueUrl = create_result.queueUrl();
-        System.out.println("Created queue '" + queueName + "', queue URL: " + queueUrl);
-        return queueUrl;
-    }
-
-    public void deleteQueue(String queueUrl) {
-        DeleteQueueRequest req =
-                DeleteQueueRequest.builder()
-                        .queueUrl(queueUrl)
-                        .build();
-
-        try {
-            sqs.deleteQueue(req);
-        } catch (Exception ignored) {
-        }
-    }
-
-    public String getQueueUrl(String queueName) {
-        GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
-                .queueName(queueName)
-                .build();
-        String queueUrl = null;
-        try {
-            queueUrl = sqs.getQueueUrl(getQueueRequest).queueUrl();
-        } catch (Exception ignored) {
-        }
-        System.out.println("Queue URL: " + queueUrl);
-        return queueUrl;
-    }
-
-    public int getQueueSize(String queueUrl) {
-        GetQueueAttributesRequest getQueueAttributesRequest = GetQueueAttributesRequest.builder()
-                .queueUrl(queueUrl)
-                .attributeNames(
-                        QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES,
-                        QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE,
-                        QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_DELAYED
-                )
-                .build();
-
-        GetQueueAttributesResponse queueAttributesResponse = null;
-        try {
-            queueAttributesResponse = sqs.getQueueAttributes(getQueueAttributesRequest);
-        } catch (Exception ignored) {
-        }
-        Map<QueueAttributeName, String> attributes = queueAttributesResponse.attributes();
-
-        return Integer.parseInt(attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES)) +
-                Integer.parseInt(attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE)) +
-                Integer.parseInt(attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_DELAYED));
-    }
-
-
-    ///////////////////////
-
-    public enum Label {
-        Manager,
-        Worker
+        sqs.createQueue(createQueueRequest);
     }
 }

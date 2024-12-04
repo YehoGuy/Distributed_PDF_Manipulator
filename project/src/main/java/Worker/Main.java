@@ -1,4 +1,9 @@
-import Worker.PDFConverter;
+package Worker;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
+
 import org.apache.pdfbox.pdmodel.PDDocument;
 
 public class Main {
@@ -26,7 +31,24 @@ public class Main {
                 document.close();
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println(e.getMessage());
+        }
+    }
+
+    private static void generateHtmlFile(String outputFilePath, List<String> results) throws Exception {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFilePath))) {
+            writer.write("<html><body>");
+            writer.write("<h1>PDF Processing Results</h1>");
+            writer.write("<ul>"); //unordered list
+            for (String result : results) {
+                writer.write("<li>" + result + "</li>"); //list item
+            }
+            writer.write("</ul>");
+            writer.write("</body></html>");
+
+            System.out.println("Output HTML file generated: " + outputFilePath);
+        } catch (IOException e) {
+            throw new Exception("Worker Error generating HTML file: " + e.getMessage());
         }
     }
 }
