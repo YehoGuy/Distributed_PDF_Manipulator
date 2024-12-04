@@ -9,7 +9,7 @@ import java.util.List;
 public class Main {
     public static void main(String[] args) {
         if (args.length < 2) {
-            System.err.println("Usage: java Main <file_path> <n> [terminate]");
+            System.err.println("Error - not enough arguments provided. Usage: java Main <file_path> <n> [terminate]");
             return;
         }
 
@@ -23,10 +23,11 @@ public class Main {
         try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
             String line;
             while ((line = br.readLine()) != null) {
-                String[] parts = line.split(" ");
+                String[] parts = line.split("\t");
                 if (parts.length == 2) {
                     operations.add(parts[0]);
                     urls.add(parts[1]);
+                    //System.out.println(parts[0] + " " + parts[1]);
                 }
             }
         } catch (IOException e) {
@@ -50,7 +51,7 @@ public class Main {
         if (terminate) {
             sendTerminateMessage();
         }
-        
+
     }
 
     private static void sendTerminateMessage() {
