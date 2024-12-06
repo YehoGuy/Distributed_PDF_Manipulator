@@ -1,12 +1,8 @@
 package Local;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
 public class Main {
+
+    /**
     public static void main(String[] args) {
         if (args.length < 2) {
             System.err.println("Error - not enough arguments provided. Usage: java Main <file_path> <n> [terminate]");
@@ -35,7 +31,7 @@ public class Main {
             return;
         }
 
-        /* 
+        
         int totalFiles = urls.size();
         int workers = (int) Math.ceil((double) totalFiles / n);
 
@@ -46,12 +42,18 @@ public class Main {
             List<String> workerOperations = operations.subList(start, end);
             // Process workerUrls and workerOperations
         }
-        */
+        
 
         if (terminate) {
             sendTerminateMessage();
         }
 
+    }
+    */
+
+    public static void main(String[] args) {
+        AwsService awsService = AwsService.getInstance();
+        awsService.createBucketIfNotExists("guysmaintestbucket2");
     }
 
     private static void sendTerminateMessage() {
