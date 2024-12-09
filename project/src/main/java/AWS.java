@@ -30,6 +30,8 @@ public class AWS {
 
     private static final AWS instance = new AWS();
 
+    public static final String BUCKET_NAME = "guys_s3_distri_bucket";
+
     private AWS() {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
@@ -40,22 +42,20 @@ public class AWS {
         return instance;
     }
 
-    public String bucketName = "only-together2";
-
 
     // S3
-    public void createBucketIfNotExists(String bucketName) {
+    private void createBucketIfNotExists() {
         try {
             s3.createBucket(CreateBucketRequest
                     .builder()
-                    .bucket(bucketName)
+                    .bucket(BUCKET_NAME)
                     .createBucketConfiguration(
                             CreateBucketConfiguration.builder()
                                     .locationConstraint(BucketLocationConstraint.US_WEST_2)
                                     .build())
                     .build());
             s3.waiter().waitUntilBucketExists(HeadBucketRequest.builder()
-                    .bucket(bucketName)
+                    .bucket(BUCKET_NAME)
                     .build());
         } catch (S3Exception e) {
             System.out.println(e.getMessage());

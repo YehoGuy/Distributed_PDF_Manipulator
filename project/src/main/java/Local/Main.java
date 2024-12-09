@@ -2,59 +2,37 @@ package Local;
 
 public class Main {
 
-    /**
+    public static AwsService aws = AwsService.getInstance();
+
     public static void main(String[] args) {
-        if (args.length < 2) {
-            System.err.println("Error - not enough arguments provided. Usage: java Main <file_path> <n> [terminate]");
-            return;
-        }
-
-        String filePath = args[0];
-        int n = Integer.parseInt(args[1]);
-        boolean terminate = args.length == 3 && args[2].equalsIgnoreCase("terminate");
-
-        List<String> operations = new ArrayList<>();
-        List<String> urls = new ArrayList<>();
-
-        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split("\t");
-                if (parts.length == 2) {
-                    operations.add(parts[0]);
-                    urls.add(parts[1]);
-                    //System.out.println(parts[0] + " " + parts[1]);
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Local Error reading input file: " + e.getMessage());
-            return;
+        
+        // handle args from user
+        //if (args.length < 2) {
+        //    System.err.println("Error - not enough arguments provided. Usage: java Main <file_path> <n> [terminate]");
+        //    return;
+        //}
+        //String filePath = args[0];
+        String filePath  = "src/main/java/Local/files/input-sample-1-cop.txt";
+        String filename = "instructions.txt";
+        //int n = Integer.parseInt(args[1]);
+        //boolean terminate = args.length == 3 && args[2].equalsIgnoreCase("terminate");
+        try {
+            aws.downloadFileFromS3(filename);
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
         }
 
         
-        int totalFiles = urls.size();
-        int workers = (int) Math.ceil((double) totalFiles / n);
 
-        for (int i = 0; i < workers; i++) {
-            int start = i * n;
-            int end = Math.min(start + n, totalFiles);
-            List<String> workerUrls = urls.subList(start, end);
-            List<String> workerOperations = operations.subList(start, end);
-            // Process workerUrls and workerOperations
-        }
-        
+    }
+    
 
-        if (terminate) {
-            sendTerminateMessage();
-        }
-
+    /* 
+    public static void main(String[] args) {
+        AwsService.getInstance().createBucketIfNotExists();
     }
     */
-
-    public static void main(String[] args) {
-        AwsService awsService = AwsService.getInstance();
-        awsService.createBucketIfNotExists("guysmaintestbucket2");
-    }
+    
 
     private static void sendTerminateMessage() {
         // Implement the logic to send a terminate message to the Manager

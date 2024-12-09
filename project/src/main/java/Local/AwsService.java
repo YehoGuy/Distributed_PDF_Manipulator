@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
@@ -47,6 +48,8 @@ public class AwsService {
     public static Region region1 = Region.US_WEST_2;
     public static Region region2 = Region.US_EAST_1;
 
+    private static final String BUCKET_NAME = "guyss3bucketfordistributedsystems";
+
     private static final AwsService instance = new AwsService();
 
     private AwsService() {
@@ -59,71 +62,73 @@ public class AwsService {
         return instance;
     }
 
-    public String bucketName = "guytestbucket";
-
     //---------------------- S3 Operations -------------------------------------------
 
     /**
      * Creates an S3 bucket if it does not already exist.
      *
      * @param bucketName Name of the S3 bucket to create.
-     */
-    public void createBucketIfNotExists(String bucketName) {
+          * @throws Exception 
+          */
+    private void createBucketIfNotExists(){
         try {
             s3.createBucket(CreateBucketRequest
                     .builder()
-                    .bucket(bucketName)
+                    .bucket(BUCKET_NAME)
                     .createBucketConfiguration(
                             CreateBucketConfiguration.builder()
                                     .locationConstraint(BucketLocationConstraint.US_WEST_2)
                                     .build())
                     .build());
             s3.waiter().waitUntilBucketExists(HeadBucketRequest.builder()
-                    .bucket(bucketName)
+                    .bucket(BUCKET_NAME)
                     .build());
-            System.out.println("[DEBUG] Bucket created successfully: " + bucketName);
-        } catch (S3Exception e) {
-            System.out.println("[ERROR] " + e.getMessage());
-        }
+            System.out.println("[DEBUG] Bucket created successfully: " + BUCKET_NAME);
+        } catch (S3Exception e) {}
     }
 
     /**
      * Uploads a file to the specified S3 bucket.
      *
      * @param filePath Path of the file to upload.
-     * @param s3Key    Key (path) under which the file will be stored in S3.
+     * @param filename Name of the file in the S3 bucket.
+     * return The key (path) of the uploaded file in the S3 bucket.
      */
-    public void uploadFileToS3(String filePath, String s3Key) {
+    public String uploadFileToS3(String filePath, String filename) throws Exception {
+        String s3Key = filename;
         try {
+            createBucketIfNotExists();
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
-                    .bucket(bucketName)
+                    .bucket(BUCKET_NAME)
                     .key(s3Key)
                     .build();
 
-            s3.putObject(putObjectRequest, Paths.get(filePath));
+            PutObjectResponse response = s3.putObject(putObjectRequest, Paths.get(filePath));
             System.out.println("[DEBUG] File uploaded to S3: " + s3Key);
         } catch (S3Exception e) {
-            System.err.println("[ERROR] " + e.getMessage());
+            throw new Exception("[ERROR] " + e.getMessage());
         }
+        return s3Key;
     }
 
     /**
      * Downloads a file from S3 and saves it locally.
      *
      * @param s3Key          Key (path) of the file in the S3 bucket.
-     * @param destinationPath Local path to save the downloaded file.
+     * @throws Exception 
      */
-    public void downloadFileFromS3(String s3Key, String destinationPath) {
+    public void downloadFileFromS3(String s3Key) throws Exception {
+        String destinationPath = "src/main/java/Local/files/" + s3Key;
         try {
             GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                    .bucket(bucketName)
+                    .bucket(BUCKET_NAME)
                     .key(s3Key)
                     .build();
 
             s3.getObject(getObjectRequest, Paths.get(destinationPath));
             System.out.println("[DEBUG] File downloaded from S3 and saved to: " + destinationPath);
         } catch (S3Exception e) {
-            System.err.println("[ERROR] " + e.getMessage());
+            throw new Exception("[ERROR] File downloaded from S3" + s3Key + "failed: " + e.getMessage());
         }
     }
 
