@@ -65,6 +65,8 @@ public class AwsService {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region2).build();
+        this.createUpStreamQueue();
+        this.createDownStreamQueue();
     }
 
     public static AwsService getInstance() {
@@ -222,21 +224,30 @@ public class AwsService {
     /**
      * Creates a fifo SQS queue with the specified name.
      */
-    private void createSqsQueue() {
+    private void createSqsQueue(String queueName) {
         try {
             // Define the FIFO-specific attributes
              Map<QueueAttributeName, String> attributes = new HashMap<>();
             attributes.put(QueueAttributeName.FIFO_QUEUE, "true"); // Mark as FIFO queue
             attributes.put(QueueAttributeName.CONTENT_BASED_DEDUPLICATION, "true"); // Optional: Enable content-based deduplication
             CreateQueueRequest createQueueRequest = CreateQueueRequest.builder()
-                    .queueName(LOCAL_MANAGER_Q)
+                    .queueName(queueName)
                     .attributes(attributes)
                     .build();
             sqs.createQueue(createQueueRequest);
-            System.out.println("[DEBUG] Queue created successfully: " + LOCAL_MANAGER_Q);
+            System.out.println("[DEBUG] Queue created successfully: " + queueName);
         } catch (SqsException e) {}
 
     }
+
+    private void createUpStreamQueue() {
+        createSqsQueue(LOCAL_MANAGER_Q);
+    }
+
+    private void createDownStreamQueue() {
+        createSqsQueue(MANAGER_LOCAL_Q);
+    }
+
 
     /**
      * Sends a message to the specified SQS queue.
@@ -245,10 +256,9 @@ public class AwsService {
      */
     public void sendMessageToSqs(String messageBody) throws Exception {
         try {
-            createSqsQueue(); 
             // Get the queue's URL
             GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
-                .queueName(MANAGER_LOCAL_Q)
+                .queueName(LOCAL_MANAGER_Q)
                 .build();
             String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
             // send the message
@@ -272,7 +282,7 @@ public class AwsService {
         try {
             // Get the queue's URL
             GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
-                .queueName(LOCAL_MANAGER_Q)
+                .queueName(MANAGER_LOCAL_Q)
                 .build();
             String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
             // receive the message
@@ -317,6 +327,7 @@ public class AwsService {
         }
     }
 
+    //---------------------- Termination Message -------------------------------------------
     /**
      * Sends a termination message to the Manager via SQS.
      *
