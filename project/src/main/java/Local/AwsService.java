@@ -2,6 +2,8 @@ package Local;
 
 import java.nio.file.Paths;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
@@ -27,6 +29,8 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
+import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
+import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SqsException;
@@ -49,6 +53,11 @@ public class AwsService {
     public static Region region2 = Region.US_EAST_1;
 
     private static final String BUCKET_NAME = "guyss3bucketfordistributedsystems";
+    private static final String LOCAL_MANAGER_Q = "LocalManagerQueue.fifo";
+    private static final String LOCAL_MANAGER_MESSAGE_GROUP_ID = "LocaToManagerGroup";
+    private static final String MANAGER_LOCAL_Q = "ManagerLocalQueue.fifo";
+    private static final String MANAGER_LOCAL_MESSAGE_GROUP_ID = "ManagerToLocalGroup";
+
 
     private static final AwsService instance = new AwsService();
 
@@ -211,70 +220,85 @@ public class AwsService {
     //---------------------- SQS Operations -------------------------------------------
 
     /**
-     * Creates an SQS queue with the specified name.
-     *
-     * @param queueName Name of the queue to create.
+     * Creates a fifo SQS queue with the specified name.
      */
-    public void createSqsQueue(String queueName) {
+    private void createSqsQueue() {
         try {
+            // Define the FIFO-specific attributes
+             Map<QueueAttributeName, String> attributes = new HashMap<>();
+            attributes.put(QueueAttributeName.FIFO_QUEUE, "true"); // Mark as FIFO queue
+            attributes.put(QueueAttributeName.CONTENT_BASED_DEDUPLICATION, "true"); // Optional: Enable content-based deduplication
             CreateQueueRequest createQueueRequest = CreateQueueRequest.builder()
-                    .queueName(queueName)
+                    .queueName(LOCAL_MANAGER_Q)
+                    .attributes(attributes)
                     .build();
             sqs.createQueue(createQueueRequest);
-            System.out.println("[DEBUG] Queue created successfully: " + queueName);
-        } catch (SqsException e) {
-            System.err.println("[ERROR] " + e.getMessage());
-        }
+            System.out.println("[DEBUG] Queue created successfully: " + LOCAL_MANAGER_Q);
+        } catch (SqsException e) {}
+
     }
 
     /**
      * Sends a message to the specified SQS queue.
      *
-     * @param queueUrl   URL of the SQS queue.
      * @param messageBody Message to send.
      */
-    public void sendMessageToSqs(String queueUrl, String messageBody) {
+    public void sendMessageToSqs(String messageBody) throws Exception {
         try {
+            createSqsQueue(); 
+            // Get the queue's URL
+            GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
+                .queueName(MANAGER_LOCAL_Q)
+                .build();
+            String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
+            // send the message
             SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody(messageBody)
+                    .messageGroupId(LOCAL_MANAGER_MESSAGE_GROUP_ID)
                     .build();
-
             sqs.sendMessage(sendMessageRequest);
             System.out.println("[DEBUG] Message sent to SQS: " + messageBody);
         } catch (SqsException e) {
-            System.err.println("[ERROR] " + e.getMessage());
+            throw new Exception("[ERROR] Message send to SQS failed: " + e.getMessage());
         }
     }
 
     /**
-     * Receives a message from the specified SQS queue.
-     *
-     * @param queueUrl URL of the SQS queue.
+     * Receives a message from the SQS queue.
      * @return The received message body, or null if no message is available.
      */
-    public String receiveMessageFromSqs(String queueUrl) {
+    public String receiveMessageFromSqs() throws Exception{
         try {
+            // Get the queue's URL
+            GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
+                .queueName(LOCAL_MANAGER_Q)
+                .build();
+            String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
+            // receive the message
             ReceiveMessageRequest receiveMessageRequest = ReceiveMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .maxNumberOfMessages(1)
                     .waitTimeSeconds(10)
                     .build();
-
             var messages = sqs.receiveMessage(receiveMessageRequest).messages();
             if (!messages.isEmpty()) {
                 var message = messages.get(0);
                 deleteMessageFromSqs(queueUrl, message.receiptHandle());
+                System.out.println("[DEBUG] Message received from SQS: " + message.body());
                 return message.body();
             }
         } catch (SqsException e) {
-            System.err.println("[ERROR] " + e.getMessage());
+            throw new Exception("[ERROR] Messsage recieving from SQS failed: " + e.getMessage());
         }
         return null;
     }
 
+
+    
     /**
      * Deletes a message from the specified SQS queue.
+     * helper for receiveMessageFromSqs
      *
      * @param queueUrl     URL of the SQS queue.
      * @param receiptHandle Receipt handle of the message to delete.
@@ -298,9 +322,13 @@ public class AwsService {
      *
      * @param queueUrl The SQS queue URL for sending the termination message.
      */
-    public void sendTerminationMessage(String queueUrl) {
-        sendMessageToSqs(queueUrl, "terminate");
+    public void sendTerminationMessage() throws Exception{
+        try{
+        sendMessageToSqs("terminate");
         System.out.println("[DEBUG] Termination message sent to Manager.");
+        } catch (Exception e) {
+            throw new Exception("[ERROR] " + e.getMessage());
+        }
     }
 
 }
