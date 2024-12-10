@@ -1,7 +1,6 @@
 package Local;
 
 import java.nio.file.Paths;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -46,17 +45,19 @@ public class AwsService {
     private final S3Client s3;
     private final SqsClient sqs;
     private final Ec2Client ec2;
+    private String managerInstanceId;
 
-    public static String ami = "ami-00e95a9222311e8ed";
+    public static final String ami = "ami-00e95a9222311e8ed";
 
-    public static Region region1 = Region.US_WEST_2;
-    public static Region region2 = Region.US_EAST_1;
+    public static final Region region1 = Region.US_WEST_2;
+    public static final Region region2 = Region.US_EAST_1;
 
     private static final String BUCKET_NAME = "guyss3bucketfordistributedsystems";
     private static final String LOCAL_MANAGER_Q = "LocalManagerQueue.fifo";
     private static final String LOCAL_MANAGER_MESSAGE_GROUP_ID = "LocaToManagerGroup";
     private static final String MANAGER_LOCAL_Q = "ManagerLocalQueue.fifo";
     private static final String MANAGER_LOCAL_MESSAGE_GROUP_ID = "ManagerToLocalGroup";
+ 
 
 
     private static final AwsService instance = new AwsService();
@@ -65,12 +66,20 @@ public class AwsService {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region2).build();
-        this.createUpStreamQueue();
-        this.createDownStreamQueue();
     }
 
     public static AwsService getInstance() {
-        return instance;
+        if(instance.init()){
+            return instance;
+        } else{
+            return null;
+        }
+    }
+
+    private boolean init(){
+        return this.createUpStreamQueue() && 
+                this.ensureManagerInstance() && 
+                this.createDownStreamQueue();
     }
 
     //---------------------- S3 Operations -------------------------------------------
@@ -146,77 +155,150 @@ public class AwsService {
     //---------------------- EC2 Operations -------------------------------------------
 
     /**
-     * Launches an EC2 instance with the specified parameters.
-     *
-     * @param script           User data script to bootstrap the instance.
-     * @param tagName          Tag name to assign to the instance.
-     * @param numberOfInstances Number of instances to launch.
-     * @return Instance ID of the first launched instance.
+     * Ensures that a Manager EC2 instance exists and is running.
+     * If no Manager exists, it creates and runs one.
      */
-    public String createEC2(String script, String tagName, int numberOfInstances) {
+    private boolean ensureManagerInstance() {
         try {
+        this.managerInstanceId = getManagerInstanceId();
+        
+        if (managerInstanceId != null) {
+            System.out.println("[INFO] Manager instance found: " + managerInstanceId);
+            
+            if (!isInstanceRunning(managerInstanceId)) {
+                System.out.println("[INFO] Manager instance is not running. Starting it...");
+                startInstance(managerInstanceId);
+            } else {
+                System.out.println("[INFO] Manager instance is already running.");
+            }
+        } else {
+            System.out.println("[INFO] No Manager instance found. Creating one...");
+            managerInstanceId = createManager();
+            
+            if (managerInstanceId != null) {
+                System.out.println("[INFO] Manager instance created and running: " + managerInstanceId);
+            } else {
+                throw new Exception("[ERROR] Failed to create Manager instance.");
+            }
+        }
+        return true;
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Gets the ID of the Manager instance if it exists.
+     *
+     * @return The instance ID of the Manager, or null if no instance is found.
+     */
+    private String getManagerInstanceId() throws Exception {
+        try {
+            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
+                    .filters(
+                            Filter.builder()
+                                    .name("tag:Name")
+                                    .values("manager")
+                                    .build()
+                    )
+                    .build();
+
+            DescribeInstancesResponse response = ec2.describeInstances(request);
+
+            return response.reservations().stream()
+                    .flatMap(reservation -> reservation.instances().stream())
+                    .findFirst()
+                    .map(instance -> instance.instanceId())
+                    .orElse(null);
+        } catch (Ec2Exception e) {
+            throw new Exception("[ERROR] Failed to get Manager instance's Id: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Checks if a given EC2 instance is running.
+     *
+     * @param instanceId The instance ID to check.
+     * @return true if the instance is running, false otherwise.
+     */
+    private boolean isInstanceRunning(String instanceId) throws Exception {
+        try {
+            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
+                    .instanceIds(instanceId)
+                    .build();
+
+            DescribeInstancesResponse response = ec2.describeInstances(request);
+
+            return response.reservations().stream()
+                    .flatMap(reservation -> reservation.instances().stream())
+                    .anyMatch(instance -> instance.state().nameAsString().equals("running"));
+        } catch (Ec2Exception e) {
+            throw new Exception("[ERROR] Failed to check instance state: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Starts an EC2 instance.
+     *
+     * @param instanceId The ID of the instance to start.
+     */
+    private void startInstance(String instanceId) throws Exception {
+        try {
+            ec2.startInstances(startInstancesRequest -> startInstancesRequest.instanceIds(instanceId));
+            System.out.println("[INFO] Instance started: " + instanceId);
+        } catch (Ec2Exception e) {
+            throw new Exception("[ERROR] Failed to start instance: " + e.getMessage());
+        }
+    }
+
+
+    /**
+     * Creates a T2_MICRO EC2 instance with the <Name, manager> tag.
+     *
+     * @return The Instance ID of the created Manager instance.
+     */
+    private String createManager() throws Exception{
+        try {
+            IamInstanceProfileSpecification role = IamInstanceProfileSpecification.builder()
+                    .name("LabInstanceProfile") // Ensure this profile has required permissions
+                    .build();
+
+            // Create the EC2 instance
             RunInstancesRequest runRequest = RunInstancesRequest.builder()
-                    .instanceType(InstanceType.M4_LARGE)
-                    .imageId(ami)
-                    .maxCount(numberOfInstances)
+                    .imageId(ami) // Use the predefined AMI
+                    .instanceType(InstanceType.T2_MICRO)
+                    .maxCount(1)
                     .minCount(1)
-                    .keyName("vockey")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().name("LabInstanceProfile").build())
-                    .userData(Base64.getEncoder().encodeToString((script).getBytes()))
+                    .iamInstanceProfile(role)
                     .build();
 
             RunInstancesResponse response = ec2.runInstances(runRequest);
             String instanceId = response.instances().get(0).instanceId();
 
+            // Add a tag <Name, manager>
             Tag tag = Tag.builder()
                     .key("Name")
-                    .value(tagName)
+                    .value("manager")
                     .build();
 
             CreateTagsRequest tagRequest = CreateTagsRequest.builder()
                     .resources(instanceId)
                     .tags(tag)
                     .build();
-
             ec2.createTags(tagRequest);
-            System.out.printf("[DEBUG] Successfully started EC2 instance %s based on AMI %s\n", instanceId, ami);
+
+            System.out.printf("[DEBUG] Manager instance created: %s\n", instanceId);
             return instanceId;
+
         } catch (Ec2Exception e) {
-            System.err.println("[ERROR] " + e.getMessage());
-            return null;
+            throw new Exception("[ERROR] Failed to create Manager instance: " + e.getMessage());
         }
     }
 
-    /**
-     * Checks if the Manager EC2 instance is active by filtering instances with a specific tag and state.
-     *
-     * @param managerTagKey   The tag key used to identify the Manager node.
-     * @param managerTagValue The tag value used to identify the Manager node.
-     * @return true if the Manager instance is active (running), false otherwise.
-     */
-    public boolean isManagerActive(String managerTagKey, String managerTagValue) {
-        try {
-            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
-                    .filters(
-                            Filter.builder()
-                                    .name("tag:" + managerTagKey) // Filter by tag key
-                                    .values(managerTagValue) // Filter by tag value
-                                    .build(),
-                            Filter.builder()
-                                    .name("instance-state-name") // Filter by instance state
-                                    .values("running") // Only consider running instances
-                                    .build()
-                    )
-                    .build();
 
-            DescribeInstancesResponse response = ec2.describeInstances(request);
-            return response.reservations().stream()
-                    .anyMatch(reservation -> !reservation.instances().isEmpty());
-        } catch (Ec2Exception e) {
-            System.err.println("[ERROR] Checking Manager instance: " + e.getMessage());
-            return false;
-        }
-    }
+
+    
 
 
     //---------------------- SQS Operations -------------------------------------------
@@ -224,7 +306,7 @@ public class AwsService {
     /**
      * Creates a fifo SQS queue with the specified name.
      */
-    private void createSqsQueue(String queueName) {
+    private boolean createSqsQueue(String queueName) {
         try {
             // Define the FIFO-specific attributes
              Map<QueueAttributeName, String> attributes = new HashMap<>();
@@ -236,16 +318,20 @@ public class AwsService {
                     .build();
             sqs.createQueue(createQueueRequest);
             System.out.println("[DEBUG] Queue created successfully: " + queueName);
-        } catch (SqsException e) {}
+            return true;
+        } catch (SqsException e) {
+            System.err.println("[ERROR] creating "+queueName+" SQS: " + e.getMessage());
+            return false;
+        }
 
     }
 
-    private void createUpStreamQueue() {
-        createSqsQueue(LOCAL_MANAGER_Q);
+    private boolean createUpStreamQueue() {
+        return createSqsQueue(LOCAL_MANAGER_Q);
     }
 
-    private void createDownStreamQueue() {
-        createSqsQueue(MANAGER_LOCAL_Q);
+    private boolean createDownStreamQueue() {
+        return createSqsQueue(MANAGER_LOCAL_Q);
     }
 
 

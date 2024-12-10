@@ -2,9 +2,10 @@ package Local;
 
 public class Main {
 
-    private static AwsService aws = AwsService.getInstance();
+    private static final AwsService aws = AwsService.getInstance();
 
     public static void main(String[] args) {
+        if(aws!=null){
         /* 
         // handle args from user
         //if (args.length < 2) {
@@ -29,6 +30,9 @@ public class Main {
             System.out.println(e.getMessage());
         }
         */
+        } else {
+            System.err.println("Error - failed to initialize AWS service.");
+        }
         
 
         
