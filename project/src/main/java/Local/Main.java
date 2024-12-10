@@ -2,7 +2,7 @@ package Local;
 
 public class Main {
 
-    private static final AwsService aws = AwsService.getInstance();
+    private static final AwsLocalService aws = AwsLocalService.getInstance();
 
     public static void main(String[] args) {
         if(aws!=null){

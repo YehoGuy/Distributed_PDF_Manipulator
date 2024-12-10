@@ -1,5 +1,10 @@
 package Local;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,7 +46,7 @@ import software.amazon.awssdk.services.sqs.model.SqsException;
 /// verify changes using 
 /// cat ~/.aws/credentials & aws s3 ls
 
-public class AwsService {
+public class AwsLocalService {
     private final S3Client s3;
     private final SqsClient sqs;
     private final Ec2Client ec2;
@@ -60,15 +65,15 @@ public class AwsService {
  
 
 
-    private static final AwsService instance = new AwsService();
+    private static final AwsLocalService instance = new AwsLocalService();
 
-    private AwsService() {
+    private AwsLocalService() {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region2).build();
     }
 
-    public static AwsService getInstance() {
+    public static AwsLocalService getInstance() {
         if(instance.init()){
             return instance;
         } else{
@@ -77,9 +82,12 @@ public class AwsService {
     }
 
     private boolean init(){
-        return this.createUpStreamQueue() && 
+        this.createBucketIfNotExists();
+        return  this.createUpStreamQueue() && 
                 this.ensureManagerInstance() && 
-                this.createDownStreamQueue();
+                this.createDownStreamQueue() &&
+                this.uploadManagersProgramToS3() && 
+                this.uploadWorkersProgramToS3();
     }
 
     //---------------------- S3 Operations -------------------------------------------
@@ -90,7 +98,7 @@ public class AwsService {
      * @param bucketName Name of the S3 bucket to create.
           * @throws Exception 
           */
-    private void createBucketIfNotExists(){
+    private boolean createBucketIfNotExists(){
         try {
             s3.createBucket(CreateBucketRequest
                     .builder()
@@ -104,7 +112,11 @@ public class AwsService {
                     .bucket(BUCKET_NAME)
                     .build());
             System.out.println("[DEBUG] Bucket created successfully: " + BUCKET_NAME);
-        } catch (S3Exception e) {}
+            return true;
+        } catch (S3Exception e) {
+            System.err.println("[ERROR] creating bucket: " + e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -112,12 +124,11 @@ public class AwsService {
      *
      * @param filePath Path of the file to upload.
      * @param filename Name of the file in the S3 bucket.
-     * return The key (path) of the uploaded file in the S3 bucket.
+     * @return The key (path) of the uploaded file in the S3 bucket.
      */
     public String uploadFileToS3(String filePath, String filename) throws Exception {
         String s3Key = filename;
         try {
-            createBucketIfNotExists();
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(BUCKET_NAME)
                     .key(s3Key)
@@ -152,6 +163,7 @@ public class AwsService {
         }
     }
 
+
     //---------------------- EC2 Operations -------------------------------------------
 
     /**
@@ -164,12 +176,26 @@ public class AwsService {
         
         if (managerInstanceId != null) {
             System.out.println("[INFO] Manager instance found: " + managerInstanceId);
-            
-            if (!isInstanceRunning(managerInstanceId)) {
-                System.out.println("[INFO] Manager instance is not running. Starting it...");
-                startInstance(managerInstanceId);
-            } else {
-                System.out.println("[INFO] Manager instance is already running.");
+
+            String instanceState = getInstanceState(managerInstanceId);
+            switch (instanceState) {
+                case "running":
+                    System.out.println("[INFO] Manager instance is already running.");
+                    break;
+
+                case "stopped":
+                    System.out.println("[INFO] Manager instance is stopped. Starting it...");
+                    startInstance(managerInstanceId);
+                    break;
+
+                case "terminated":
+                    System.out.println("[INFO] Manager instance is terminated. Creating a new one...");
+                    managerInstanceId = createManager();
+                    break;
+
+                default:
+                    System.out.println("[WARN] Manager instance is in an unsupported state: " + instanceState);
+                    break;
             }
         } else {
             System.out.println("[INFO] No Manager instance found. Creating one...");
@@ -298,7 +324,31 @@ public class AwsService {
 
 
 
-    
+    /**
+    * Retrieves the current state of an EC2 instance.
+    *
+    * @param instanceId The ID of the instance.
+    * @return The state of the instance (e.g., "running", "stopped", "terminated").
+    */
+    private String getInstanceState(String instanceId) throws Exception {
+        try {
+            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
+                    .instanceIds(instanceId)
+                    .build();
+
+            DescribeInstancesResponse response = ec2.describeInstances(request);
+
+            return response.reservations().stream()
+                    .flatMap(reservation -> reservation.instances().stream())
+                    .findFirst()
+                    .map(instance -> instance.state().nameAsString())
+                    .orElse("unknown");
+
+        } catch (Ec2Exception e) {
+            throw new Exception("[ERROR] Failed to get instance state: " + e.getMessage());
+        }
+    }
+
 
 
     //---------------------- SQS Operations -------------------------------------------
@@ -427,5 +477,197 @@ public class AwsService {
             throw new Exception("[ERROR] " + e.getMessage());
         }
     }
+
+    //---------------------- FUNC -------------------------------------------
+
+    private boolean uploadManagersProgramToS3() {
+        try {
+            // Define paths
+            String projectRoot = "project"; // Root directory of your Maven project
+            String managerSourceDir = "src/main/java/Manager";
+            String targetDir = "target";
+            String jarFileName = "ManagerProgram.jar";
+            String jarFilePath = targetDir+"/"+jarFileName;
+
+            // Compile the Manager subproject
+            compileManagerSubproject(managerSourceDir, targetDir);
+
+            // Upload the JAR file to S3
+            String s3Key = uploadFileToS3(jarFilePath, jarFileName);
+            System.out.println("[INFO] Manager program uploaded to S3 with key: " + s3Key);
+            return true;
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed to upload Manager program to S3: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+    * Compiles the Manager subproject into a JAR file.
+    *
+    * @param sourceDir The directory containing the Manager source code.
+    * @param targetDir The directory where the compiled JAR file will be saved.
+    * @throws IOException If the compilation fails.
+    * @throws InterruptedException 
+    */
+    private void compileManagerSubproject(String sourceDir, String targetDir) throws IOException, InterruptedException {
+        // Compile the Java source files
+        String[] compileCommand = {
+            "javac",
+            "-d", targetDir + "/classes",
+            sourceDir + "/Main.java",
+            sourceDir + "/AwsService.java"
+        };
+
+        ProcessBuilder compileProcessBuilder = new ProcessBuilder(compileCommand);
+        compileProcessBuilder.redirectErrorStream(true);
+        Process compileProcess = compileProcessBuilder.start();
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println("[Compiler] " + line);
+            }
+        }
+
+        int compileExitCode = compileProcess.waitFor();
+        if (compileExitCode != 0) {
+            throw new IOException("Compilation failed with exit code: " + compileExitCode);
+        }
+        System.out.println("[INFO] Manager directory compiled successfully.");
+
+        // Create the manifest file
+        String manifestFilePath = targetDir + "/MANIFEST.MF";
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(manifestFilePath))) {
+            writer.write("Main-Class: Manager.Main\n"); // Replace "Manager.Main" with the actual main class
+            writer.newLine();
+        }
+
+        // Package into an executable JAR
+        String jarFilePath = targetDir + "/ManagerProgram.jar";
+        String[] jarCommand = {
+            "jar",
+            "cfe",
+            jarFilePath,
+            "Manager.Main", // Replace with the actual main class
+            "-C", targetDir + "/classes", "."
+        };
+
+        ProcessBuilder jarProcessBuilder = new ProcessBuilder(jarCommand);
+        jarProcessBuilder.redirectErrorStream(true);
+        Process jarProcess = jarProcessBuilder.start();
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(jarProcess.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println("[Jar] " + line);
+            }
+        }
+
+        int jarExitCode = jarProcess.waitFor();
+        if (jarExitCode != 0) {
+            throw new IOException("JAR packaging failed with exit code: " + jarExitCode);
+        }
+        System.out.println("[INFO] Executable JAR file created successfully: " + jarFilePath);
+    }
+
+    private boolean uploadWorkersProgramToS3() {
+        try {
+            // Define paths
+            String projectRoot = "project"; // Root directory of your Maven project
+            String workerSourceDir = "src/main/java/Worker";
+            String targetDir = "target";
+            String jarFileName = "WorkerProgram.jar";
+            String jarFilePath = targetDir+"/"+jarFileName;
+
+            // Compile the Worker subproject
+            compileWorkerSubproject(workerSourceDir, targetDir);
+
+            // Upload the JAR file to S3
+            String s3Key = uploadFileToS3(jarFilePath, jarFileName);
+            System.out.println("[INFO] Worker program uploaded to S3 with key: " + s3Key);
+            return true;
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed to upload Worker program to S3: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+ * Compiles the Worker subproject into a JAR file with dependency support.
+ *
+ * @param sourceDir The directory containing the Worker source code.
+ * @param targetDir The directory where the compiled JAR file will be saved.
+ * @throws IOException If the compilation fails.
+ * @throws InterruptedException 
+ */
+    private void compileWorkerSubproject(String sourceDir, String targetDir) throws IOException, InterruptedException {
+        // Path to the PDFBox JAR file
+        String pdfboxJarPath = "src/main/java/Worker/libs/pdfbox-2.0.29.jar"; // Update this path if the JAR file is located elsewhere
+
+        // Compile the Java source files
+        String[] compileCommand = {
+            "javac",
+            "-cp", pdfboxJarPath, // Include the PDFBox JAR in the classpath
+            "-d", targetDir + "/classes",
+            sourceDir + "/Main.java",
+            sourceDir + "/PDFConverter.java"
+        };
+
+        ProcessBuilder compileProcessBuilder = new ProcessBuilder(compileCommand);
+        compileProcessBuilder.redirectErrorStream(true);
+        Process compileProcess = compileProcessBuilder.start();
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println("[Compiler] " + line);
+            }
+        }
+
+        int compileExitCode = compileProcess.waitFor();
+        if (compileExitCode != 0) {
+            throw new IOException("Compilation failed with exit code: " + compileExitCode);
+        }
+        System.out.println("[INFO] Worker directory compiled successfully.");
+
+        // Create the manifest file
+        String manifestFilePath = targetDir + "/MANIFEST.MF";
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(manifestFilePath))) {
+            writer.write("Main-Class: Worker.Main\n"); // Replace "Worker.Main" with the actual main class
+            writer.write("Class-Path: " + pdfboxJarPath + "\n"); // Add the PDFBox JAR to the classpath
+            writer.newLine();
+        }
+
+        // Package into an executable JAR
+        String jarFilePath = targetDir + "/WorkerProgram.jar";
+        String[] jarCommand = {
+            "jar",
+            "cmf",
+            manifestFilePath, // Use the generated manifest file
+            jarFilePath,
+            "-C", targetDir + "/classes", "."
+        };
+
+        ProcessBuilder jarProcessBuilder = new ProcessBuilder(jarCommand);
+        jarProcessBuilder.redirectErrorStream(true);
+        Process jarProcess = jarProcessBuilder.start();
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(jarProcess.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println("[Jar] " + line);
+            }
+        }
+
+        int jarExitCode = jarProcess.waitFor();
+        if (jarExitCode != 0) {
+            throw new IOException("JAR packaging failed with exit code: " + jarExitCode);
+        }
+        System.out.println("[INFO] Executable JAR file created successfully: " + jarFilePath);
+    }
+
+
+
 
 }
