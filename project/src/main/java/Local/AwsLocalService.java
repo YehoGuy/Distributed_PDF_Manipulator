@@ -6,6 +6,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -62,6 +63,9 @@ public class AwsLocalService {
     private static final String LOCAL_MANAGER_MESSAGE_GROUP_ID = "LocaToManagerGroup";
     private static final String MANAGER_LOCAL_Q = "ManagerLocalQueue.fifo";
     private static final String MANAGER_LOCAL_MESSAGE_GROUP_ID = "ManagerToLocalGroup";
+
+    private static final String MANAGER_PROGRAM_S3KEY = "ManagerProgram.jar";
+    private static final String WORKER_PROGRAM_S3KEY = "WorkerProgram.jar";
  
 
 
@@ -242,27 +246,6 @@ public class AwsLocalService {
         }
     }
 
-    /**
-     * Checks if a given EC2 instance is running.
-     *
-     * @param instanceId The instance ID to check.
-     * @return true if the instance is running, false otherwise.
-     */
-    private boolean isInstanceRunning(String instanceId) throws Exception {
-        try {
-            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
-                    .instanceIds(instanceId)
-                    .build();
-
-            DescribeInstancesResponse response = ec2.describeInstances(request);
-
-            return response.reservations().stream()
-                    .flatMap(reservation -> reservation.instances().stream())
-                    .anyMatch(instance -> instance.state().nameAsString().equals("running"));
-        } catch (Ec2Exception e) {
-            throw new Exception("[ERROR] Failed to check instance state: " + e.getMessage());
-        }
-    }
 
     /**
      * Starts an EC2 instance.
@@ -279,6 +262,7 @@ public class AwsLocalService {
     }
 
 
+
     /**
      * Creates a T2_MICRO EC2 instance with the <Name, manager> tag.
      *
@@ -286,6 +270,12 @@ public class AwsLocalService {
      */
     private String createManager() throws Exception{
         try {
+            // Generate the User Data script
+            String userDataScript = generateUserDataScript(BUCKET_NAME, MANAGER_PROGRAM_S3KEY);
+
+            // Encode the User Data script in Base64 as required by AWS
+            String userDataEncoded = Base64.getEncoder().encodeToString(userDataScript.getBytes());
+
             IamInstanceProfileSpecification role = IamInstanceProfileSpecification.builder()
                     .name("LabInstanceProfile") // Ensure this profile has required permissions
                     .build();
@@ -297,6 +287,7 @@ public class AwsLocalService {
                     .maxCount(1)
                     .minCount(1)
                     .iamInstanceProfile(role)
+                    .userData(userDataEncoded)
                     .build();
 
             RunInstancesResponse response = ec2.runInstances(runRequest);
@@ -321,6 +312,17 @@ public class AwsLocalService {
             throw new Exception("[ERROR] Failed to create Manager instance: " + e.getMessage());
         }
     }
+
+    // Make sure userScript is correct
+    private String generateUserDataScript(String s3BucketName, String jarFileName) {
+        return "#!/bin/bash\n" +
+               "yum update -y\n" +  // Update packages
+               "mkdir -p /home/ec2-user/app\n" +  // Create a directory for the app
+               "cd /home/ec2-user/app\n" +
+               "aws s3 cp s3://" + s3BucketName + "/" + jarFileName + " ./\n" +  // Download the JAR file
+               "java -jar " + jarFileName + " > app.log 2>&1 &\n";  // Run the JAR in the background and log output
+    }
+    
 
 
 
