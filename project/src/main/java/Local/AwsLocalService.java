@@ -86,16 +86,55 @@ public class AwsLocalService {
     }
 
     private boolean init(){
-        this.createBucketIfNotExists();
-        return  this.createUpStreamQueue() && 
-                this.ensureManagerInstance() && 
+        return  this.ensureS3Bucket() &&
+                this.createUpStreamQueue() &&  
                 this.createDownStreamQueue() &&
                 this.uploadManagersProgramToS3() && 
-                this.uploadWorkersProgramToS3();
+                this.uploadWorkersProgramToS3() &&
+                this.ensureManagerInstance();
     }
 
     //---------------------- S3 Operations -------------------------------------------
 
+    private boolean ensureS3Bucket() {
+        try {
+            // Check if the bucket exists
+            if (!doesBucketExist(BUCKET_NAME)) {
+                System.out.println("[INFO] S3 bucket does not exist. Creating bucket: " + BUCKET_NAME);
+                if (createBucketIfNotExists()) {
+                    System.out.println("[INFO] S3 bucket created successfully: " + BUCKET_NAME);
+                } else {
+                    throw new Exception("[ERROR] Failed to create S3 bucket: " + BUCKET_NAME);
+                }
+            } else {
+                System.out.println("[INFO] S3 bucket already exists: " + BUCKET_NAME);
+            }
+            return true;
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Checks if the S3 bucket exists.
+     *
+     * @param bucketName Name of the S3 bucket to check.
+     * @return true if the bucket exists, false otherwise.
+     */
+    private boolean doesBucketExist(String bucketName) {
+        try {
+            s3.headBucket(HeadBucketRequest.builder().bucket(bucketName).build());
+            return true;
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return false; // Bucket does not exist
+            }
+            System.err.println("[ERROR] Failed to check bucket existence: " + e.getMessage());
+            return false;
+        }
+    }
+    
     /**
      * Creates an S3 bucket if it does not already exist.
      *
@@ -271,7 +310,7 @@ public class AwsLocalService {
     private String createManager() throws Exception{
         try {
             // Generate the User Data script
-            String userDataScript = generateUserDataScript(BUCKET_NAME, MANAGER_PROGRAM_S3KEY);
+            String userDataScript = generateManagerDataScript(BUCKET_NAME, MANAGER_PROGRAM_S3KEY);
 
             // Encode the User Data script in Base64 as required by AWS
             String userDataEncoded = Base64.getEncoder().encodeToString(userDataScript.getBytes());
@@ -314,10 +353,11 @@ public class AwsLocalService {
     }
 
     // Make sure userScript is correct
-    private String generateUserDataScript(String s3BucketName, String jarFileName) {
+    private String generateManagerDataScript(String s3BucketName, String jarFileName) {
         return "#!/bin/bash\n" +
                "yum update -y\n" +  // Update packages
                "mkdir -p /home/ec2-user/app\n" +  // Create a directory for the app
+               "mkdir -p /home/ec2-user/app/files\n" +  // Create a directory for Manager's files
                "cd /home/ec2-user/app\n" +
                "aws s3 cp s3://" + s3BucketName + "/" + jarFileName + " ./\n" +  // Download the JAR file
                "java -jar " + jarFileName + " > app.log 2>&1 &\n";  // Run the JAR in the background and log output
@@ -513,65 +553,82 @@ public class AwsLocalService {
     * @throws InterruptedException 
     */
     private void compileManagerSubproject(String sourceDir, String targetDir) throws IOException, InterruptedException {
+        // Paths to the AWS SDK JAR files
+        String s3JarPath = "src/main/java/Manager/libs/s3-2.28.18.jar"; 
+        String ec2JarPath = "src/main/java/Manager/libs/ec2-2.28.18.jar"; 
+        String sqsJarPath = "src/main/java/Manager/libs/sqs-2.28.18.jar"; 
+        String regionsJarPath = "src/main/java/Manager/libs/regions-2.28.18.jar";
+        String coreJarPath = "src/main/java/Manager/libs/aws-core-2.28.18.jar";
+        String utilsJarPath = "src/main/java/Manager/libs/utils-2.28.18.jar";
+        String sdkCoreJarPath = "src/main/java/Manager/libs/sdk-core-2.28.18.jar";
+    
+        // Combine JAR files into a single classpath using ":" for macOS
+        String classpath = s3JarPath + ":" + ec2JarPath + ":" + sqsJarPath + ":" + regionsJarPath + ":" + coreJarPath + ":" + utilsJarPath + ":" + sdkCoreJarPath;
+    
         // Compile the Java source files
         String[] compileCommand = {
             "javac",
+            "-cp", classpath, // Include all JARs in the classpath
             "-d", targetDir + "/classes",
             sourceDir + "/Main.java",
-            sourceDir + "/AwsService.java"
+            sourceDir + "/AwsManagerService.java"
         };
-
+    
         ProcessBuilder compileProcessBuilder = new ProcessBuilder(compileCommand);
         compileProcessBuilder.redirectErrorStream(true);
         Process compileProcess = compileProcessBuilder.start();
-
+    
+        // Capture and print output from the compilation process
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 System.out.println("[Compiler] " + line);
             }
         }
-
+    
         int compileExitCode = compileProcess.waitFor();
         if (compileExitCode != 0) {
             throw new IOException("Compilation failed with exit code: " + compileExitCode);
         }
         System.out.println("[INFO] Manager directory compiled successfully.");
-
+    
         // Create the manifest file
         String manifestFilePath = targetDir + "/MANIFEST.MF";
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(manifestFilePath))) {
-            writer.write("Main-Class: Manager.Main\n"); // Replace "Manager.Main" with the actual main class
+            writer.write("Main-Class: Manager.Main\n"); // Set the main class
+            writer.write("Class-Path: " + s3JarPath + " " + ec2JarPath + " " + sqsJarPath + "\n"); // Add the JARs to the classpath
             writer.newLine();
         }
-
+    
         // Package into an executable JAR
         String jarFilePath = targetDir + "/ManagerProgram.jar";
         String[] jarCommand = {
             "jar",
-            "cfe",
+            "cmf",
+            manifestFilePath, // Use the generated manifest file
             jarFilePath,
-            "Manager.Main", // Replace with the actual main class
             "-C", targetDir + "/classes", "."
         };
-
+    
         ProcessBuilder jarProcessBuilder = new ProcessBuilder(jarCommand);
         jarProcessBuilder.redirectErrorStream(true);
         Process jarProcess = jarProcessBuilder.start();
-
+    
+        // Capture and print output from the JAR packaging process
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(jarProcess.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 System.out.println("[Jar] " + line);
             }
         }
-
+    
         int jarExitCode = jarProcess.waitFor();
         if (jarExitCode != 0) {
             throw new IOException("JAR packaging failed with exit code: " + jarExitCode);
         }
         System.out.println("[INFO] Executable JAR file created successfully: " + jarFilePath);
     }
+    
 
     private boolean uploadWorkersProgramToS3() {
         try {
@@ -613,7 +670,8 @@ public class AwsLocalService {
             "-cp", pdfboxJarPath, // Include the PDFBox JAR in the classpath
             "-d", targetDir + "/classes",
             sourceDir + "/Main.java",
-            sourceDir + "/PDFConverter.java"
+            sourceDir + "/PDFConverter.java",
+            sourceDir + "/AwsWorkerService.java"
         };
 
         ProcessBuilder compileProcessBuilder = new ProcessBuilder(compileCommand);
