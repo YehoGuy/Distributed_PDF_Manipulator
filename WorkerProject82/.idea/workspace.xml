@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="b15976a0-4044-485e-a04d-356a79b062b6" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../ManagerProject82/src/main/java/AwsManagerService.java" beforeDir="false" afterPath="$PROJECT_DIR$/../ManagerProject82/src/main/java/AwsManagerService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ManagerProject82/src/main/java/Main.java" beforeDir="false" afterPath="$PROJECT_DIR$/../ManagerProject82/src/main/java/Main.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/.idea/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/.idea/encodings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/.idea/misc.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/.idea/vcs.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/pom.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/src/main/java/AwsWorkerService.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/src/main/java/Main.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../WorkerProject/src/main/java/PDFConverter.java" beforeDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 0
+}]]></component>
+  <component name="ProjectId" id="2qCsCFRb3CTEzwV6t96ZKktdf3d" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "development",
+    "kotlin-language-version-configured": "true",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "preferences.lookFeel",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="b15976a0-4044-485e-a04d-356a79b062b6" name="Changes" comment="" />
+      <created>1734177762081</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1734177762081</updated>
+      <workItem from="1734177763780" duration="6000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>
