@@ -1,6 +1,7 @@
 import java.util.ArrayList;
 import java.util.List;
 
+
 // Each SubManager is responsible for a single client
 public class SubManager implements Runnable {
 
@@ -25,17 +26,18 @@ public class SubManager implements Runnable {
             // download instructions file
             List<String> instructions = aws.downloadFileFromS3(this.instructionsFileS3Key);
             int numOfWorkers = (instructions.size() / this.filesPerWorker) + 1;
-            // enforce max number of workers limit
+            // enforce filesPerWorker with max number of workers limit
             if(numOfWorkers > this.maxNumberOfWorkers){
                 numOfWorkers = this.maxNumberOfWorkers;
             }
             ensureWorkers(this.aws, numOfWorkers);
-            // establish workers ==> submanager queue
+            // establish workers ==> subManager queue
             aws.createWorkersToSMQueue();
             // send instructions to workers
             for(int i=0 ; i<instructions.size() ; i++){
-                aws.sendInstructionToWorkers(instructions.get(i));
+                aws.sendInstructionToWorkers(instructions.get(i)+"\t"+clientId);
             }
+            // busy collect answers
             List<String> results = new ArrayList<>();
             while(results.size() < instructions.size()){
                 String result = aws.receiveResultFromWorkers();
@@ -43,9 +45,12 @@ public class SubManager implements Runnable {
                     results.add(result);
                 }
                 // to not overload the queue with requests
-                try { Thread.sleep(100); } catch (Exception e) {}
+                try { Thread.sleep(100); } catch (Exception e) { }
             }
-            // TODO: process results to a file etc...
+            
+            // upload results to S3 & send url to local
+            aws.sendMessageToLocal(aws.uploadSummaryHtmlToS3(results));
+            
             
         } catch (Exception e){
 
@@ -64,6 +69,9 @@ public class SubManager implements Runnable {
         } catch (Exception e) {
         }
     }
+
+
+    
 
     
 }

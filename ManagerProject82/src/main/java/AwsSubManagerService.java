@@ -3,13 +3,13 @@
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ec2.model.CreateTagsRequest;
@@ -25,8 +25,6 @@ import software.amazon.awssdk.services.ec2.model.Tag;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
-import software.amazon.awssdk.services.s3.model.PutObjectResponse;
-import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
@@ -40,28 +38,30 @@ import software.amazon.awssdk.services.sqs.model.SqsException;
 public class AwsSubManagerService {
     // instance attributes
     private final int clientId;
-    private final String workersToSMQ;
     
-    // shared attributes
+    // AWS general values
     public static final String ami = "ami-00e95a9222311e8ed";
-
     public static final Region region1 = Region.US_WEST_2;
     public static final Region region2 = Region.US_EAST_1;
 
+    // S3 attributes
     private static final S3Client s3 = S3Client.builder().region(region1).build();
-    private static final SqsClient sqs = SqsClient.builder().region(region1).build();
-    private static final Ec2Client ec2 = Ec2Client.builder().region(region2).build();
-
     private static final String BUCKET_NAME = "guyss3bucketfordistributedsystems";
     private static final String WORKER_PROGRAM_S3KEY = "WorkerProgram.jar";
 
+    // EC2 attributes
+    private static final Ec2Client ec2 = Ec2Client.builder().region(region2).build();
+
+    // SQS attributes
+    private static final SqsClient sqs = SqsClient.builder().region(region1).build();
     private static final String MANAGER_TO_WORKERS_Q = "ManagerWorkersQueue.fifo";
-    private static final String MANAGER_WORKERS_MESSAGE_GROUP_ID = "ManagerToWorkersGroup";
-    
+    private final String workersToSMQ; // "WorkersToSM"+this.clientId+".fifo"
+    private final String smToLocalQ; // "SMToLocal"+this.clientId+".fifo"
 
     public AwsSubManagerService(int clientId){
         this.clientId = clientId;
         this.workersToSMQ = "WorkersToSM"+this.clientId+".fifo";
+        this.smToLocalQ = "SMToLocal"+this.clientId+".fifo";
     }
      // --------------------- ec2 operations ---------------------
 
@@ -293,8 +293,8 @@ public class AwsSubManagerService {
             // send the message
             SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
                     .queueUrl(queueUrl)
-                    .messageBody(this.workersToSMQ+"    "+messageBody)
-                    .messageGroupId(MANAGER_WORKERS_MESSAGE_GROUP_ID)
+                    .messageBody(messageBody)
+                    .messageGroupId("1")
                     .build();
             sqs.sendMessage(sendMessageRequest);
             System.out.println("[DEBUG] Message sent to ManagerToLocalSQS: " + messageBody);
@@ -324,7 +324,7 @@ public class AwsSubManagerService {
             if (!messages.isEmpty()) {
                 Message message = messages.get(0);
                 deleteMessageFromSqs(queueUrl, message.receiptHandle());
-                System.out.println("[DEBUG] Message received from WorkersToManagerSQS: " + message.body());
+                System.out.println("[DEBUG] Message received from WorkersToSMManagerSQS: " + message.body());
                 return message.body();
             }
         } catch (SqsException e) {
@@ -333,6 +333,31 @@ public class AwsSubManagerService {
         return null;
     }
 
+
+    /**
+     * Sends a message to the specified SQS queue.
+     *
+     * @param messageBody Message to send.
+     */
+    public void sendMessageToLocal(String messageBody) throws Exception {
+        try {
+            // Get the queue's URL
+            GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
+                    .queueName(this.smToLocalQ)
+                    .build();
+            String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
+            // send the message
+            SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(messageBody)
+                    .messageGroupId("1")
+                    .build();
+            sqs.sendMessage(sendMessageRequest);
+            System.out.println("[DEBUG] Message sent to client "+clientId+": " + messageBody);
+        } catch (SqsException e) {
+            throw new Exception("[ERROR] Message send to ManagerToLocalSQS failed: " + e.getMessage());
+        }
+    }
 
 
     /**
@@ -357,29 +382,39 @@ public class AwsSubManagerService {
     }
 
     
+
+    
     //--------------------- s3 operations ----------------------
 
-    /**
-     * Uploads a file to the specified S3 bucket.
-     *
-     * @param filePath Path of the file to upload.
-     * @param filename Name of the file in the S3 bucket.
-     * @return The key (path) of the uploaded file in the S3 bucket.
-     */
-    public String uploadFileToS3(String filePath, String filename) throws Exception {
-        String s3Key = "client"+this.clientId+"/"+filename;
+    public String uploadSummaryHtmlToS3(List<String> results) throws Exception {
         try {
-            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
-                    .bucket(BUCKET_NAME)
-                    .key(s3Key)
-                    .build();
+            // Step 1: Convert List<String> to HTML format
+            StringBuilder htmlBuilder = new StringBuilder();
+            htmlBuilder.append("<html><body><ul>");
+            for (String result : results) {
+                htmlBuilder.append("<li>").append(result).append("</li>");
+            }
+            htmlBuilder.append("</ul></body></html>");
+            String htmlContent = htmlBuilder.toString();
 
-            PutObjectResponse response = s3.putObject(putObjectRequest, Paths.get(filePath));
-            System.out.println("[DEBUG] File uploaded to S3: " + s3Key);
-        } catch (S3Exception e) {
-            throw new Exception("[ERROR] " + e.getMessage());
+            // Step 2: Convert HTML to byte array
+            byte[] htmlData = htmlContent.getBytes();
+
+            // Step 3: Upload the byte array to S3
+            S3Client s3 = S3Client.builder().build();
+            s3.putObject(
+                PutObjectRequest.builder()
+                    .bucket(BUCKET_NAME)
+                    .key("summary"+clientId + ".html")
+                    .build(),
+                RequestBody.fromBytes(htmlData)
+            );
+
+            // Step 4: Return the S3 URL
+            return "https://" + BUCKET_NAME + ".s3.amazonaws.com/" + "summary"+clientId + ".html";
+        } catch (Exception e) {
+            throw new Exception("Failed to upload HTML to S3: " + e.getMessage());
         }
-        return s3Key;
     }
 
     /**

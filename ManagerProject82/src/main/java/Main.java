@@ -1,89 +1,95 @@
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class Main {
 
     private static final AwsManagerService aws = AwsManagerService.getInstance();
-    private static String instructionsFileS3Key;
-    private static int n;
+    
+    private static boolean terminate = false;
+
+    private static int maxIterations = 200; // for not accidently wasting my AWS money (:D)
+    private static int restTime = 3000; // 3 seconds
+
+    private static final int MAX_PARALLEL_CLIENTS = 20; // T3_SMALL is Optimal for 20 parallel Threads
+    private static final int MAX_PARALLEL_WORKERS = 8;
+
+    private static final ExecutorService THREAD_POOL = Executors.newFixedThreadPool(MAX_PARALLEL_CLIENTS);
+
+    
 
     public static void main(String[] args) {
         try{
             if(aws!=null){
 
-                List<String> operations = new ArrayList<String>();
-                List<String> urls = new ArrayList<String>();
-
-                // read first message, hoping for filename,number_of_workers
-                String message = aws.receiveMessageFromLocalSqs();
-                String[] splits = message.split(",");
-                if(splits.length != 2){
-                    throw new Exception("failed to handle first message from Local - expected 2 parts, got "+splits.length);
-                }
-                else{
-                    instructionsFileS3Key = splits[0];
-                    n = Integer.parseInt(splits[1]);
-                }
-
-                // download the instructions file from S3.
-                try {
-                    aws.downloadFileFromS3(instructionsFileS3Key);
-                } catch (Exception e) {
-                    throw new Exception("failed to download "+instructionsFileS3Key+" instructions file from S3: "+e.getMessage());
-                }
-
-                // SQS requires some time to initialize, so we wait for 1 second.
-                try {
-                    Thread.sleep(1000); // Pause for 1 second (1000 milliseconds)
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt(); // Reset the interrupted status
-                    throw new Exception("Thread was interrupted when trying to rest for a sec: " + e.getMessage());
-                }
-
-                aws.sendMessageToLocalSqs("all good");
-
-                /*
-
-                try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        String[] parts = line.split("\t");
-                        if (parts.length == 2) {
-                            operations.add(parts[0]);
-                            urls.add(parts[1]);
-                            //System.out.println(parts[0] + " " + parts[1]);
+                while(!terminate){
+                    String message = aws.receiveMessageFromLocalSqs();
+                    // no message received
+                    if(message == null){
+                        try {
+                            Thread.sleep(restTime); // Pause for 1 second (1000 milliseconds)
+                            continue;
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt(); // Reset the interrupted status
+                            throw new Exception("Thread was interrupted when trying to rest for a sec: " + e.getMessage());
                         }
-                    }
-                } catch (IOException e) {
-                    System.err.println("Local Error reading input file: " + e.getMessage());
-                    return;
+                    } else {
+                        // message received
+                        if(message.equals("terminate")){
+                            terminate = true;
+                            break;
+                        } else {
+                            String[] splits = message.split(",");
+                            if(splits.length != 3){
+                            throw new Exception("failed to handle first message from Local - expected 3 parts, got "+splits.length);
+                            }
+                            else{
+                                execute(splits);
+                            }
+                        }
+                    } 
                 }
 
+                System.out.println("manager terminating...");
+                System.out.println("Termination result: "+terminate());
 
-                int totalFiles = urls.size();
-                int workers = (int) Math.ceil((double) totalFiles / n);
-
-                for (int i = 0; i < workers; i++) {
-                    int start = i * n;
-                    int end = Math.min(start + n, totalFiles);
-                    List<String> workerUrls = urls.subList(start, end);
-                    List<String> workerOperations = operations.subList(start, end);
-                    // Process workerUrls and workerOperations
-                }
-                */
-
-            } else {
-                throw new Exception("ManagerError - failed to initialize AWS service.");
+            } 
+            else {
+                throw new Exception("failed to initialize AWS service.");
             }
+
         } catch(Exception e){
             System.err.println("ManagerError - failed to run program: "+e.getMessage());
-            try {
-                aws.sendMessageToLocalSqs("ManagerError - failed to run program: "+e.getMessage());
-            } catch (Exception innerException) {
-                System.err.println("ManagerError - failed to send error message to Local: "+innerException.getMessage());
-            }
-
         }
+    }
+
+    private static boolean terminate(){
+        try {
+            THREAD_POOL.awaitTermination(1200, TimeUnit.SECONDS);
+            return terminateAllWorkers();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+        
+
+    public static boolean terminateAllWorkers(){
+        System.out.println("Starting termination of all workers");
+        boolean result = true;
+        for(int i=0 ; i<MAX_PARALLEL_WORKERS ; i++){
+            try {
+                aws.terminateWorkerInstance(i);
+            } catch (Exception e) {
+                System.err.println("ManagerError - failed to terminate worker "+i+": "+e.getMessage());
+                result = false;
+            }
+        }
+        return result;
+    }
+
+    private static void execute(String[] args){
+        SubManager subManager = new SubManager(args, MAX_PARALLEL_WORKERS);
+        THREAD_POOL.execute(subManager);
     }
 
 }
