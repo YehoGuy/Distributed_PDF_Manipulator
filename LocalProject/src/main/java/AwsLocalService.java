@@ -45,46 +45,44 @@ import software.amazon.awssdk.services.sqs.model.SqsException;
 /// cat ~/.aws/credentials & aws s3 ls
 
 public class AwsLocalService {
+
+    // instance values
     private final S3Client s3;
     private final SqsClient sqs;
     private final Ec2Client ec2;
-    private String managerInstanceId;
+    private int clientId;
+    private String downStreamQueue;
 
+
+    
+
+    // shared values
     public static final String ami = "ami-00e95a9222311e8ed";
 
     public static final Region region1 = Region.US_WEST_2;
     public static final Region region2 = Region.US_EAST_1;
-
     private static final String BUCKET_NAME = "guyss3bucketfordistributedsystems";
-    private static final String LOCAL_MANAGER_Q = "LocalManagerQueue.fifo";
-    private static final String LOCAL_MANAGER_MESSAGE_GROUP_ID = "LocaToManagerGroup";
-    private static final String MANAGER_LOCAL_Q = "ManagerLocalQueue.fifo";
+    private static final String UPSTREAM_Q = "LocalManagerQueue.fifo";
+    private static final String UPSTREAM_MESSAGE_GROUP_ID = "LocalToManagerGroup";
     private static final String MANAGER_LOCAL_MESSAGE_GROUP_ID = "ManagerToLocalGroup";
-
     private static final String MANAGER_PROGRAM_S3KEY = "ManagerProgram.jar";
     private static final String WORKER_PROGRAM_S3KEY = "WorkerProgram.jar";
- 
     private static final String PATH_TO_MANAGER_PROJECT_JAR = "mwJars/ManagerProject.jar";
     private static final String PATH_TO_WORKER_PROJECT_JAR = "mwJars/WorkerProject.jar";
 
+    private static String managerInstanceId;
 
-    private static final AwsLocalService instance = new AwsLocalService();
 
-    private AwsLocalService() {
+    public AwsLocalService(int clientId) {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region2).build();
+        this.clientId = clientId;
+        this.downStreamQueue = "ManagerLocalQueue"+clientId+".fifo";
+
     }
 
-    public static AwsLocalService getInstance() {
-        if(instance.init()){
-            return instance;
-        } else{
-            return null;
-        }
-    }
-
-    private boolean init(){
+    private boolean init() {
         //sequential order
         return  this.ensureS3Bucket() &&
                 this.createUpStreamQueue() &&  
@@ -268,7 +266,7 @@ public class AwsLocalService {
                     .filters(
                             Filter.builder()
                                     .name("tag:Name")
-                                    .values("managerrr")
+                                    .values("manager")
                                     .build()
                     )
                     .build();
@@ -322,7 +320,7 @@ public class AwsLocalService {
             // Create the EC2 instance
             RunInstancesRequest runRequest = RunInstancesRequest.builder()
                     .imageId(ami) // Use the predefined AMI
-                    .instanceType(InstanceType.T2_MICRO)
+                    .instanceType(InstanceType.T2_MICRO) //TODO T3_SMALL for server, T2_Micro for worker
                     .maxCount(1)
                     .minCount(1)
                     .iamInstanceProfile(role)
@@ -335,7 +333,7 @@ public class AwsLocalService {
             // Add a tag <Name, manager>
             Tag tag = Tag.builder()
                     .key("Name")
-                    .value("managerrr")
+                    .value("manager")
                     .build();
 
             CreateTagsRequest tagRequest = CreateTagsRequest.builder()
@@ -415,11 +413,11 @@ public class AwsLocalService {
     }
 
     private boolean createUpStreamQueue() {
-        return createSqsQueue(LOCAL_MANAGER_Q);
+        return createSqsQueue(UPSTREAM_Q);
     }
 
     private boolean createDownStreamQueue() {
-        return createSqsQueue(MANAGER_LOCAL_Q);
+        return createSqsQueue(this.downStreamQueue);
     }
 
 
@@ -432,14 +430,14 @@ public class AwsLocalService {
         try {
             // Get the queue's URL
             GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
-                .queueName(LOCAL_MANAGER_Q)
+                .queueName(UPSTREAM_Q)
                 .build();
             String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
             // send the message
             SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody(messageBody)
-                    .messageGroupId(LOCAL_MANAGER_MESSAGE_GROUP_ID)
+                    .messageGroupId(UPSTREAM_MESSAGE_GROUP_ID)
                     .build();
             sqs.sendMessage(sendMessageRequest);
             System.out.println("[DEBUG] Message sent to SQS: " + messageBody);
@@ -456,7 +454,7 @@ public class AwsLocalService {
         try {
             // Get the queue's URL
             GetQueueUrlRequest getQueueUrlRequest = GetQueueUrlRequest.builder()
-                .queueName(MANAGER_LOCAL_Q)
+                .queueName(this.downStreamQueue)
                 .build();
             String queueUrl = sqs.getQueueUrl(getQueueUrlRequest).queueUrl();
             // receive the message
