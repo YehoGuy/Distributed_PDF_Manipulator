@@ -1,54 +1,73 @@
-package Worker;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.List;
-
 import org.apache.pdfbox.pdmodel.PDDocument;
 
 public class Main {
     public static void main(String[] args) {
-        System.out.println("Current working directory: " + System.getProperty("user.dir"));
         try {
-            String pdfUrl = "input/Assignment1.pdf"; // Replace with your PDF URL
-            String outputDirectory = "output/";
-
-            // Fetch the PDF from the URL
-            PDDocument document = PDFConverter.loadLocalPDF(pdfUrl);
-
-            // Ensure the document is loaded
-            if (document != null) {
-                // Convert to PNG image
-                PDFConverter.ToImage(document, outputDirectory + "page1.png");
-
-                // Convert to HTML
-                PDFConverter.ToHTML(document, outputDirectory + "page1.html");
-
-                // Convert to Text
-                PDFConverter.ToText(document, outputDirectory + "page1.txt");
-
-                // Close the document
-                document.close();
+            while (true) { 
+                // Receive a message from the SQS queue
+                String message = AwsWorkerService.receiveMessageFromManager();
+                String[] splits = message.split("\t");
+                if(splits.length != 3) {
+                    System.out.println("[ERROR] Invalid message format: " + message);
+                    continue;
+                }
+                String op = splits[0];
+                String URL = splits[1];
+                int clientId = Integer.parseInt(splits[2]);
+                String fileName = URL.substring(URL.lastIndexOf('/') + 1);  
+                System.out.println("[DEBUG] Working on message: " + message);
+                switch(op){
+                    case "toImage":
+                        try {
+                            PDDocument document = PDFConverter.loadPDF(URL);
+                            byte[] imageData = PDFConverter.ToImage(document);
+                            String resultAdress = AwsWorkerService.uploadToS3("client"+clientId+"/"+fileName+".png", imageData);
+                            String resultMessageBody = op + "\t" + URL + "\t" + resultAdress;
+                            sendResultToSM(resultMessageBody, clientId);
+                        } catch (Exception e) {
+                            sendResultToSM("Image conversion failed: " + e.getMessage(), clientId);
+                        }
+                        break;
+                    case "toHTML":
+                        try {
+                            PDDocument document = PDFConverter.loadPDF(URL);
+                            byte[] htmlData = PDFConverter.ToHTML(document);
+                            String resultAdress = AwsWorkerService.uploadToS3("client"+clientId+"/"+fileName+".html", htmlData);
+                            String resultMessageBody = op + "\t" + URL + "\t" + resultAdress;
+                            sendResultToSM(resultMessageBody, clientId);
+                        } catch (Exception e) {
+                            sendResultToSM("HTML conversion failed: " + e.getMessage(), clientId);
+                        }
+                        break;
+                    case "toText":
+                        try {
+                            PDDocument document = PDFConverter.loadPDF(URL);
+                            byte[] textData = PDFConverter.ToText(document);
+                            String resultAdress = AwsWorkerService.uploadToS3("client"+clientId+"/"+fileName+".txt", textData);
+                            String resultMessageBody = op + "\t" + URL + "\t" + resultAdress;
+                            sendResultToSM(resultMessageBody, clientId);
+                        } catch (Exception e) {
+                            sendResultToSM("Text conversion failed: " + e.getMessage(), clientId);
+                        }
+                        break;
+                }
+                
+                
             }
         } catch (Exception e) {
             System.out.println(e.getMessage());
         }
     }
 
-    private static void generateHtmlFile(String outputFilePath, List<String> results) throws Exception {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFilePath))) {
-            writer.write("<html><body>");
-            writer.write("<h1>PDF Processing Results</h1>");
-            writer.write("<ul>"); //unordered list
-            for (String result : results) {
-                writer.write("<li>" + result + "</li>"); //list item
-            }
-            writer.write("</ul>");
-            writer.write("</body></html>");
-
-            System.out.println("Output HTML file generated: " + outputFilePath);
-        } catch (IOException e) {
-            throw new Exception("Worker Error generating HTML file: " + e.getMessage());
+    public static void sendResultToSM(String message, int clientId) {
+        try {
+            AwsWorkerService.sendMessageToSM(message, clientId);
+        } catch (Exception e) {
+            System.out.println("[ERROR] failed to send result back to SubManager: "+e.getMessage());
         }
     }
+
+    
+
+    
 }
