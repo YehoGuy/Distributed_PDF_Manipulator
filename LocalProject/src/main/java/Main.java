@@ -20,15 +20,24 @@ public class Main {
             try (Scanner scanner = new Scanner(System.in)) {
                 clientId = scanner.nextInt();
             } catch(Exception e){
-                System.err.println("failure to recieve instance id");
+                System.err.println("failed to recieve instance id: " + e.getMessage());
+                return;
             }
-            String filename = "instructions"+clientId+".txt";
+            // init aws service with client id
+            // aws initialization handles:
+            // 1. creating the S3 bucket
+            // 2. creating the UpStream SQS queue
+            // 3. creating the DownStream SQS queue
+            // 4. uploading Manager & Worker jars to S3
+            // 5.  ensuring Manager's existance
             aws = new AwsLocalService(clientId);
             // upload the instructions file to S3.
+            String filename = "instructions"+clientId+".txt";
             try {
                 aws.uploadFileToS3(filePath, filename);
             } catch (Exception e) {
-                System.out.println(e.getMessage());
+                System.out.println("failed to upload instructions to S3: "+e.getMessage());
+                return;
             }
             // SQS requires some time to initialize, so we wait for 1 second.
             try {
@@ -38,15 +47,13 @@ public class Main {
                 System.err.println("Thread was interrupted: " + e.getMessage());
             }
             // send SQS message with the files location and num of workers
+            // message format: <filename>,<filesPerWorker>,<clientId>
             try{
                 aws.sendMessageToManager(filename+","+n+","+clientId);
             } catch (Exception e) {
                 System.out.println(e.getMessage());
             }
-
-
-
-            
+            // if terminate flag is on, send terminate message
             if(terminate){
                 sendTerminateMessage();
             }
@@ -72,7 +79,7 @@ public class Main {
         
 
     } catch (Exception e) {
-        System.err.println(e.getMessage());
+        System.err.println("[LocalError] an error occoured: " + e.getMessage());
     }
     
 
@@ -81,6 +88,10 @@ public class Main {
 
     private static void sendTerminateMessage() {
         try {
+            // Pause for 1 second (1000 milliseconds)
+            // to minimize the probabbility of the termination 
+            // message arriving before the task message.
+            Thread.sleep(1000); 
             aws.sendTerminationMessage();
         } catch (Exception e) {
             System.err.println(e.getMessage());

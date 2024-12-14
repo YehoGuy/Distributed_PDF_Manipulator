@@ -47,28 +47,33 @@ import software.amazon.awssdk.services.sqs.model.SqsException;
 public class AwsLocalService {
 
     // instance values
-    private final S3Client s3;
-    private final SqsClient sqs;
-    private final Ec2Client ec2;
     private int clientId;
-    private String downStreamQueue;
-
-
     
 
-    // shared values
+    // AWS general values
     public static final String ami = "ami-00e95a9222311e8ed";
-
     public static final Region region1 = Region.US_WEST_2;
     public static final Region region2 = Region.US_EAST_1;
+
+    // S3 values
+    private final S3Client s3;
     private static final String BUCKET_NAME = "guyss3bucketfordistributedsystems";
+    private static final String PATH_TO_MANAGER_PROJECT_JAR = "mwJars/ManagerProject.jar";
+    private static final String PATH_TO_WORKER_PROJECT_JAR = "mwJars/WorkerProject.jar";
+    private static final String MANAGER_PROGRAM_S3KEY = "ManagerProgram.jar";
+    private static final String WORKER_PROGRAM_S3KEY = "WorkerProgram.jar";
+
+    // EC2 values
+    private final Ec2Client ec2;
+
+    // SQS values
+    private final SqsClient sqs;
     private static final String UPSTREAM_Q = "LocalManagerQueue.fifo";
     private static final String UPSTREAM_MESSAGE_GROUP_ID = "LocalToManagerGroup";
     private static final String MANAGER_LOCAL_MESSAGE_GROUP_ID = "ManagerToLocalGroup";
-    private static final String MANAGER_PROGRAM_S3KEY = "ManagerProgram.jar";
-    private static final String WORKER_PROGRAM_S3KEY = "WorkerProgram.jar";
-    private static final String PATH_TO_MANAGER_PROJECT_JAR = "mwJars/ManagerProject.jar";
-    private static final String PATH_TO_WORKER_PROJECT_JAR = "mwJars/WorkerProject.jar";
+    private String downStreamQueue;
+    
+    
 
     private static String managerInstanceId;
 
@@ -78,7 +83,7 @@ public class AwsLocalService {
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region2).build();
         this.clientId = clientId;
-        this.downStreamQueue = "ManagerLocalQueue"+clientId+".fifo";
+        this.downStreamQueue = "SMToLocal"+clientId+".fifo";
 
     }
 
@@ -88,7 +93,7 @@ public class AwsLocalService {
                 this.createUpStreamQueue() &&  
                 this.createDownStreamQueue() &&
                 this.uploadManagersProgramToS3() && 
-                //this.uploadWorkersProgramToS3() &&
+                this.uploadWorkersProgramToS3() &&
                 this.ensureManagerInstance();
     }
 
