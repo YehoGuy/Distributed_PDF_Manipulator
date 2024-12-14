@@ -31,6 +31,10 @@ public class Main {
             // 4. uploading Manager & Worker jars to S3
             // 5.  ensuring Manager's existance
             aws = new AwsLocalService(clientId);
+            if(!aws.init()){
+                System.err.println("failed to initialize aws service");
+                return;
+            }
             // upload the instructions file to S3.
             String filename = "instructions"+clientId+".txt";
             try {
@@ -53,10 +57,6 @@ public class Main {
             } catch (Exception e) {
                 System.out.println(e.getMessage());
             }
-            // if terminate flag is on, send terminate message
-            if(terminate){
-                sendTerminateMessage();
-            }
             // busy wait for answer
             String output = aws.receiveMessageFromManager();
             while(output == null){
@@ -69,6 +69,10 @@ public class Main {
                 output = aws.receiveMessageFromManager();
             }
             System.out.println(output);
+            // if terminate flag is on, send terminate message
+            if(terminate){
+                sendTerminateMessage();
+            }
             
             
             

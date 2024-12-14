@@ -87,7 +87,7 @@ public class AwsLocalService {
 
     }
 
-    private boolean init() {
+    public boolean init() {
         //sequential order
         return  this.ensureS3Bucket() &&
                 this.createUpStreamQueue() &&  

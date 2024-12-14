@@ -23,6 +23,7 @@ public class SubManager implements Runnable {
     @Override
     public void run() {
         try{
+            System.out.println("SubManager "+this.clientId+" started");
             // download instructions file
             List<String> instructions = aws.downloadFileFromS3(this.instructionsFileS3Key);
             int numOfWorkers = (instructions.size() / this.filesPerWorker) + 1;
@@ -43,9 +44,13 @@ public class SubManager implements Runnable {
                 String result = aws.receiveResultFromWorkers();
                 if(result!=null){
                     results.add(result);
+                    System.out.println("SubManager "+this.clientId+" received result: "+result);
                 }
-                // to not overload the queue with requests
-                try { Thread.sleep(100); } catch (Exception e) { }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
             
             // upload results to S3 & send url to local
@@ -53,7 +58,7 @@ public class SubManager implements Runnable {
             
             
         } catch (Exception e){
-
+            System.out.println("[SubManagerError] - failed to run SubManager "+this.clientId+": "+e.getMessage());
         }
     }
 

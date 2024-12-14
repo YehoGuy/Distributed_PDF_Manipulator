@@ -396,22 +396,22 @@ public class AwsSubManagerService {
             }
             htmlBuilder.append("</ul></body></html>");
             String htmlContent = htmlBuilder.toString();
-
+    
             // Step 2: Convert HTML to byte array
             byte[] htmlData = htmlContent.getBytes();
-
-            // Step 3: Upload the byte array to S3
-            S3Client s3 = S3Client.builder().build();
+    
+            // Step 4: Upload to S3
+            String objectKey = "summary" + clientId + ".html";
             s3.putObject(
                 PutObjectRequest.builder()
-                    .bucket(BUCKET_NAME)
-                    .key("summary"+clientId + ".html")
+                    .bucket("guyss3bucketfordistributedsystems") // Your bucket name
+                    .key(objectKey)
                     .build(),
                 RequestBody.fromBytes(htmlData)
             );
-
-            // Step 4: Return the S3 URL
-            return "https://" + BUCKET_NAME + ".s3.amazonaws.com/" + "summary"+clientId + ".html";
+    
+            // Step 5: Return the S3 URL
+            return "https://guyss3bucketfordistributedsystems.s3.us-west-2.amazonaws.com/" + objectKey;
         } catch (Exception e) {
             throw new Exception("Failed to upload HTML to S3: " + e.getMessage());
         }

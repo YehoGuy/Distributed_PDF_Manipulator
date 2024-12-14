@@ -35,13 +35,14 @@ public class Main {
                         }
                     } else {
                         // message received
+                        System.out.println("Received message from Local: "+message);
                         if(message.equals("terminate")){
                             terminate = true;
                             break;
                         } else {
                             String[] splits = message.split(",");
                             if(splits.length != 3){
-                            throw new Exception("failed to handle first message from Local - expected 3 parts, got "+splits.length);
+                                throw new Exception("failed to handle first message from Local - expected 3 parts, got "+splits.length);
                             }
                             else{
                                 execute(splits);
@@ -55,11 +56,11 @@ public class Main {
 
             } 
             else {
-                throw new Exception("failed to initialize AWS service.");
+                throw new Exception("[ManagerError] failed to initialize AWS service.");
             }
 
         } catch(Exception e){
-            System.err.println("ManagerError - failed to run program: "+e.getMessage());
+            System.err.println("[ManagerError] - failed to run program: "+e.getMessage());
         }
     }
 
