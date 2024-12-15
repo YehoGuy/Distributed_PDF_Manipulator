@@ -1,0 +1,12 @@
+ToImage	http://www.jewishfederations.org/local_includes/downloads/39497.pdf
+ToHTML	http://www.st.tees.org.uk/assets/Downloads/Passover-service.pdf
+ToText	http://www.chabad.org/media/pdf/42/kUgi423322.pdf
+ToImage	http://www.bethelnewton.org/images/Passover_Guide_BOOKLET.pdf
+ToImage	http://scheinerman.net/judaism/pesach/haggadah.pdf
+ToImage	http://www.crcweb.org/Passover/cRcPassoverGuide13_FINAL%20-%20WITHOUT%20ADS.pdf
+ToImage	http://www.kidswithfoodallergies.org/KFA-Celebrates-Passover.pdf
+ToImage	http://www.fairwaymarket.com/wp-content/uploads/2013/09/Kosher-Passover-Menu_FINAL.pdf
+ToHTML	http://www.jewishcamp.org/sites/default/files/u8/Camp%20Passover%202013.pdf
+ToHTML	http://www.bnaitikvah.net/prayer_ritual/documents/PassoverGuidelines.pdf
+ToHTML	http://www.jsor.org/2014Passoverlist.pdf
+ToHTML	http://www.rabbinicalassembly.org/sites/default/files/public/jewish-law/holidays/pesah/why-do-we-sing-the-song-of-songs-on-passover.pdf

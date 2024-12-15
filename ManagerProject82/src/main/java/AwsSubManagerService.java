@@ -28,6 +28,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteQueueRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
@@ -378,6 +379,25 @@ public class AwsSubManagerService {
             System.out.println("[DEBUG] Message deleted from SQS: " + receiptHandle);
         } catch (SqsException e) {
             throw new Exception("[ERROR] deleting message from workersToSM queue: " + e.getMessage());
+        }
+    }
+
+    public void deleteDownStreamQueue() throws Exception {
+        try {
+            // Step 1: Get the queue URL from the name
+            String queueUrl = sqs.getQueueUrl(GetQueueUrlRequest.builder()
+                .queueName(this.workersToSMQ)
+                .build()).queueUrl();
+
+            // Step 2: Delete the queue
+            DeleteQueueRequest deleteQueueRequest = DeleteQueueRequest.builder()
+                .queueUrl(queueUrl)
+                .build();
+            sqs.deleteQueue(deleteQueueRequest);
+
+            System.out.println("Queue deleted successfully: " + this.workersToSMQ);
+        } catch (SqsException e) {
+            throw new Exception("Failed to delete SQS queue: " + e.awsErrorDetails().errorMessage(), e);
         }
     }
 

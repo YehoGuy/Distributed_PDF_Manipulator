@@ -75,6 +75,8 @@ public class AwsManagerService {
         // Create an EC2 client
         try {
             String instanceId = getWorkerInstanceId(n);
+            if(instanceId == null)
+                return;
             // Build the termination request
             TerminateInstancesRequest terminateRequest = TerminateInstancesRequest.builder()
                     .instanceIds(instanceId)

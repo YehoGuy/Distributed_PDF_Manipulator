@@ -66,7 +66,7 @@ public class Main {
 
     private static boolean terminate(){
         try {
-            THREAD_POOL.awaitTermination(1200, TimeUnit.SECONDS);
+            THREAD_POOL.awaitTermination(20, TimeUnit.SECONDS);
             return terminateAllWorkers();
         } catch (Exception e) {
             return false;

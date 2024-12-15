@@ -9,12 +9,13 @@ public class Main {
         try {
             // handle args from user
             if (args.length < 2) {
-                System.err.println("Error - not enough arguments provided. Usage: java Main <file_path> <n> [terminate]");
+                System.err.println("Error - not enough arguments provided. Usage: java Main <input_file_path> <output_file_path> <n> [terminate]");
                 return;
             }
             String filePath = args[0];
-            int n = Integer.parseInt(args[1]);
-            boolean terminate = args.length == 3 && args[2].equalsIgnoreCase("terminate");
+            String outputFilePath = args[1];
+            int n = Integer.parseInt(args[2]);
+            boolean terminate = args.length == 4 && args[3].equalsIgnoreCase("terminate");
             // get instance id from user
             System.out.println("Enter a numerical Id for your client (must be uniqe and not -1): ");
             try (Scanner scanner = new Scanner(System.in)) {
@@ -68,18 +69,15 @@ public class Main {
                 }
                 output = aws.receiveMessageFromManager();
             }
-            System.out.println(output);
             // if terminate flag is on, send terminate message
             if(terminate){
                 sendTerminateMessage();
             }
-            
-            
-            
-        
+            System.out.println("output: "+output);
+            System.out.println("downloading summary file...");
+            aws.downloadFileFromS3(output, outputFilePath);
 
-
-        
+            aws.deleteDownStreamQueue();
         
 
     } catch (Exception e) {

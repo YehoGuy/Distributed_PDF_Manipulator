@@ -1,5 +1,8 @@
 
 
+import java.io.File;
+import java.net.URI;
+import java.net.URL;
 import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HashMap;
@@ -30,6 +33,7 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteQueueRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
@@ -191,21 +195,36 @@ public class AwsLocalService {
     /**
      * Downloads a file from S3 and saves it locally.
      *
-     * @param s3Key          Key (path) of the file in the S3 bucket.
+     * @param fileUrl      URL of the file to download.
+     * @param downloadPath Path to save the downloaded file.
      * @throws Exception 
      */
-    public void downloadFileFromS3(String s3Key) throws Exception {
-        String destinationPath = "files/" + s3Key;
+    public void downloadFileFromS3(String fileUrl, String downloadPath) throws Exception {
         try {
-            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                    .bucket(BUCKET_NAME)
-                    .key(s3Key)
-                    .build();
+            // Parse the URL to extract bucket name and object key
+            URL url = URI.create(fileUrl).toURL();
+            String host = url.getHost(); // e.g., guyss3bucketfordistributedsystems.s3.us-west-2.amazonaws.com
+            String bucketName = host.split("\\.")[0]; // Extract bucket name
+            String key = url.getPath().substring(1); // Remove the leading slash from the path
 
-            s3.getObject(getObjectRequest, Paths.get(destinationPath));
-            System.out.println("[DEBUG] File downloaded from S3 and saved to: " + destinationPath);
-        } catch (S3Exception e) {
-            throw new Exception("[ERROR] File downloaded from S3" + s3Key + "failed: " + e.getMessage());
+            // Configure S3 Client with region
+            S3Client s3 = S3Client.builder()
+                .region(Region.US_WEST_2) // Set the correct region for your bucket
+                .build();
+
+            // Download the file from S3
+            File file = new File(downloadPath);
+            s3.getObject(
+                GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(key)
+                    .build(),
+                file.toPath()
+            );
+
+            System.out.println("File downloaded to: " + file.getAbsolutePath());
+        } catch (Exception e) {
+            throw new Exception("Failed to download file from S3: " + e.getMessage());
         }
     }
 
@@ -501,6 +520,25 @@ public class AwsLocalService {
             System.out.println("[DEBUG] Message deleted from SQS: " + receiptHandle);
         } catch (SqsException e) {
             System.err.println("[ERROR] " + e.getMessage());
+        }
+    }
+
+    public void deleteDownStreamQueue() throws Exception {
+        try {
+            // Step 1: Get the queue URL from the name
+            String queueUrl = sqs.getQueueUrl(GetQueueUrlRequest.builder()
+                .queueName(this.downStreamQueue)
+                .build()).queueUrl();
+
+            // Step 2: Delete the queue
+            DeleteQueueRequest deleteQueueRequest = DeleteQueueRequest.builder()
+                .queueUrl(queueUrl)
+                .build();
+            sqs.deleteQueue(deleteQueueRequest);
+
+            System.out.println("Queue deleted successfully: " + this.downStreamQueue);
+        } catch (SqsException e) {
+            throw new Exception("Failed to delete SQS queue: " + e.awsErrorDetails().errorMessage(), e);
         }
     }
 

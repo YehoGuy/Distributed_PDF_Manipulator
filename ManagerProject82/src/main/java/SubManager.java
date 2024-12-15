@@ -56,7 +56,7 @@ public class SubManager implements Runnable {
             // upload results to S3 & send url to local
             aws.sendMessageToLocal(aws.uploadSummaryHtmlToS3(results));
             
-            
+            aws.deleteDownStreamQueue();
         } catch (Exception e){
             System.out.println("[SubManagerError] - failed to run SubManager "+this.clientId+": "+e.getMessage());
         }
